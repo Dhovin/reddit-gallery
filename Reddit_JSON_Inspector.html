@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reddit JSON Inspector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-200 p-6 font-sans">
+    <div class="max-w-4xl mx-auto flex flex-col gap-4">
+        <h1 class="text-2xl font-bold text-orange-500">Reddit API Video/RedGIF Inspector</h1>
+        <p class="text-sm text-gray-400">Paste a direct link to a Reddit post to see exactly what video URLs the API is providing.</p>
+        
+        <div class="flex gap-2">
+            <input type="text" id="post-url" class="flex-grow bg-gray-800 border border-gray-700 rounded p-2 text-white" placeholder="https://www.reddit.com/r/Subreddit/comments/id/title/">
+            <button onclick="fetchJson()" class="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded font-bold shadow transition-colors">Fetch JSON</button>
+        </div>
+
+        <div id="results" class="hidden flex-col gap-4 mt-4">
+            <div class="bg-gray-800 p-4 rounded border border-gray-700 shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-blue-400 border-b border-gray-700 pb-2">Extracted Media Links</h2>
+                <ul id="media-links" class="list-disc pl-5 break-all text-sm flex flex-col gap-2 font-mono"></ul>
+            </div>
+            
+            <div class="bg-gray-800 p-4 rounded border border-gray-700 shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-green-400 border-b border-gray-700 pb-2">Raw JSON Dump</h2>
+                <pre id="json-dump" class="text-xs overflow-x-auto bg-black p-4 rounded h-[500px] border border-gray-600 text-gray-300"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function fetchJsonp(url) {
+            return new Promise((resolve, reject) => {
+                const callbackName = 'reddit_jsonp_' + Math.random().toString(36).substr(2, 9);
+                const connector = url.includes('?') ? '&' : '?';
+                const jsonpUrl = `${url}${connector}jsonp=${callbackName}`;
+                
+                const script = document.createElement('script');
+                script.src = jsonpUrl;
+                
+                window[callbackName] = (data) => {
+                    cleanup();
+                    resolve(data);
+                };
+                
+                script.onerror = (err) => {
+                    cleanup();
+                    reject(new Error(`JSONP request to ${url} failed`));
+                };
+                
+                function cleanup() {
+                    delete window[callbackName];
+                    script.remove();
+                }
+                
+                document.body.appendChild(script);
+            });
+        }
+
+        async function fetchJsonWithFallback(url) {
+            // Strategy 1: JSONP for Reddit URLs (completely bypasses CORS)
+            if (url.includes('reddit.com')) {
+                try {
+                    console.log(`Trying JSONP for ${url}...`);
+                    return await fetchJsonp(url);
+                } catch (e) {
+                    console.warn(`JSONP failed for ${url}, falling back to direct fetch...`, e);
+                }
+            }
+
+            // Strategy 2: Direct fetch (for local/extension bypasses)
+            try {
+                const response = await fetch(url);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`Direct fetch HTTP status ${response.status}`);
+            } catch (e) {
+                console.warn(`Direct fetch failed for ${url}, trying cors-proxy.org...`, e);
+            }
+
+            // Strategy 3: cors-proxy.org
+            try {
+                const proxiedUrl = `https://cors-proxy.org/?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`cors-proxy.org HTTP status ${response.status}`);
+            } catch (e) {
+                console.warn(`cors-proxy.org failed for ${url}, trying AllOrigins get...`, e);
+            }
+
+            // Strategy 4: AllOrigins cache contents (highly reliable JSON parse)
+            try {
+                const proxiedUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.contents) {
+                        return JSON.parse(data.contents);
+                    }
+                }
+                throw new Error(`AllOrigins get HTTP status ${response?.status}`);
+            } catch (e) {
+                console.warn(`AllOrigins get failed for ${url}, trying yacdn...`, e);
+            }
+
+            // Strategy 5: YACDN proxy (unencoded URL)
+            try {
+                const proxiedUrl = `https://yacdn.org/proxy/${url}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`YACDN proxy HTTP status ${response.status}`);
+            } catch (e) {
+                console.error(`All proxies failed for ${url}`, e);
+                throw e;
+            }
+        }
+
+        async function fetchJson() {
+            let url = document.getElementById('post-url').value.trim();
+            if (!url) return alert('Please enter a Reddit post URL');
+            
+            // Strip trailing slashes and add .json
+            url = url.replace(/\/$/, '');
+            if (!url.endsWith('.json')) {
+                url += '.json';
+            }
+            url += '?raw_json=1';
+            
+            try {
+                const data = await fetchJsonWithFallback(url);
+                const postData = data[0].data.children[0].data;
+                
+                document.getElementById('results').classList.remove('hidden');
+                document.getElementById('json-dump').textContent = JSON.stringify(postData, null, 2);
+                
+                const links = [];
+                
+                // Dig into common video locations
+                if (postData.url) links.push(`[Base URL] \n<a href="${postData.url}" target="_blank" class="text-blue-300 hover:underline">${postData.url}</a>`);
+                
+                if (postData.url_overridden_by_dest) links.push(`[Overridden URL] \n<a href="${postData.url_overridden_by_dest}" target="_blank" class="text-blue-300 hover:underline">${postData.url_overridden_by_dest}</a>`);
+                
+                if (postData.preview?.reddit_video_preview?.fallback_url) {
+                    links.push(`[Preview Fallback (Usually SD)] \n<a href="${postData.preview.reddit_video_preview.fallback_url}" target="_blank" class="text-purple-300 hover:underline">${postData.preview.reddit_video_preview.fallback_url}</a>`);
+                }
+                
+                if (postData.preview?.images?.[0]?.variants?.mp4?.source?.url) {
+                    links.push(`[Preview MP4 Variant Source (Usually HD)] \n<a href="${postData.preview.images[0].variants.mp4.source.url}" target="_blank" class="text-green-300 hover:underline">${postData.preview.images[0].variants.mp4.source.url}</a>`);
+                }
+
+                if (postData.secure_media?.oembed?.thumbnail_url) {
+                    links.push(`[Secure Media Thumbnail] \n<a href="${postData.secure_media.oembed.thumbnail_url}" target="_blank" class="text-yellow-300 hover:underline">${postData.secure_media.oembed.thumbnail_url}</a>`);
+                }
+                
+                if (postData.media?.reddit_video?.fallback_url) {
+                    links.push(`[Reddit Video Fallback] \n<a href="${postData.media.reddit_video.fallback_url}" target="_blank" class="text-pink-300 hover:underline">${postData.media.reddit_video.fallback_url}</a>`);
+                }
+
+                const ul = document.getElementById('media-links');
+                ul.innerHTML = '';
+                if (links.length === 0) {
+                    ul.innerHTML = '<li class="text-red-400">No standard video links found. Please check the Raw JSON dump below.</li>';
+                } else {
+                    links.forEach(l => {
+                        const li = document.createElement('li');
+                        li.innerHTML = l;
+                        ul.appendChild(li);
+                    });
+                }
+            } catch (err) {
+                alert('Error fetching data: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>

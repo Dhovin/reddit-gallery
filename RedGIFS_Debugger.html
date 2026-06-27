@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RedGIFs Debugger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-200 p-6 font-sans">
+    <div class="max-w-6xl mx-auto flex flex-col gap-6">
+        <h1 class="text-2xl font-bold text-red-500">Reddit vs RedGIFs Link Debugger</h1>
+        
+        <div class="flex gap-2">
+            <input type="text" id="post-url" value="https://www.reddit.com/r/highheelsNSFW/comments/1s1e6y2/are_heels_make_me_hotter/" class="flex-grow bg-gray-800 border border-gray-700 rounded p-2 text-white w-full" placeholder="Reddit URL">
+            <button onclick="analyze()" class="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded font-bold shadow transition-colors whitespace-nowrap">Analyze Links</button>
+        </div>
+
+        <div id="results" class="hidden grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- Reddit Provided Links -->
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-lg flex flex-col gap-4">
+                <h2 class="text-xl font-semibold text-orange-400 border-b border-gray-700 pb-2">1. Reddit API Data</h2>
+                <div id="reddit-links" class="flex flex-col gap-4 text-sm overflow-x-auto"></div>
+            </div>
+            
+            <!-- RedGIFs Guessed Links -->
+            <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-lg flex flex-col gap-4">
+                <h2 class="text-xl font-semibold text-red-400 border-b border-gray-700 pb-2">2. Direct RedGIFs CDN Tests</h2>
+                <p class="text-xs text-gray-400 -mt-2">Testing standard MP4 endpoints using the extracted ID.</p>
+                <div id="redgifs-links" class="flex flex-col gap-4 text-sm overflow-x-auto"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        function fetchJsonp(url) {
+            return new Promise((resolve, reject) => {
+                const callbackName = 'reddit_jsonp_' + Math.random().toString(36).substr(2, 9);
+                const connector = url.includes('?') ? '&' : '?';
+                const jsonpUrl = `${url}${connector}jsonp=${callbackName}`;
+                
+                const script = document.createElement('script');
+                script.src = jsonpUrl;
+                
+                window[callbackName] = (data) => {
+                    cleanup();
+                    resolve(data);
+                };
+                
+                script.onerror = (err) => {
+                    cleanup();
+                    reject(new Error(`JSONP request to ${url} failed`));
+                };
+                
+                function cleanup() {
+                    delete window[callbackName];
+                    script.remove();
+                }
+                
+                document.body.appendChild(script);
+            });
+        }
+
+        async function fetchJsonWithFallback(url) {
+            // Strategy 1: JSONP for Reddit URLs (completely bypasses CORS)
+            if (url.includes('reddit.com')) {
+                try {
+                    console.log(`Trying JSONP for ${url}...`);
+                    return await fetchJsonp(url);
+                } catch (e) {
+                    console.warn(`JSONP failed for ${url}, falling back to direct fetch...`, e);
+                }
+            }
+
+            // Strategy 2: Direct fetch (for local/extension bypasses)
+            try {
+                const response = await fetch(url);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`Direct fetch HTTP status ${response.status}`);
+            } catch (e) {
+                console.warn(`Direct fetch failed for ${url}, trying cors-proxy.org...`, e);
+            }
+
+            // Strategy 3: cors-proxy.org
+            try {
+                const proxiedUrl = `https://cors-proxy.org/?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`cors-proxy.org HTTP status ${response.status}`);
+            } catch (e) {
+                console.warn(`cors-proxy.org failed for ${url}, trying AllOrigins get...`, e);
+            }
+
+            // Strategy 4: AllOrigins cache contents (highly reliable JSON parse)
+            try {
+                const proxiedUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.contents) {
+                        return JSON.parse(data.contents);
+                    }
+                }
+                throw new Error(`AllOrigins get HTTP status ${response?.status}`);
+            } catch (e) {
+                console.warn(`AllOrigins get failed for ${url}, trying yacdn...`, e);
+            }
+
+            // Strategy 5: YACDN proxy (unencoded URL)
+            try {
+                const proxiedUrl = `https://yacdn.org/proxy/${url}`;
+                const response = await fetch(proxiedUrl);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`YACDN proxy HTTP status ${response.status}`);
+            } catch (e) {
+                console.error(`All proxies failed for ${url}`, e);
+                throw e;
+            }
+        }
+
+        async function analyze() {
+            let url = document.getElementById('post-url').value.trim();
+            if (!url) return alert('Enter a URL');
+            
+            url = url.replace(/\/$/, '');
+            if (!url.endsWith('.json')) url += '.json';
+            url += '?raw_json=1';
+            
+            document.getElementById('results').classList.remove('hidden');
+            const redditContainer = document.getElementById('reddit-links');
+            const redgifsContainer = document.getElementById('redgifs-links');
+            
+            redditContainer.innerHTML = '<span class="text-gray-400">Fetching data...</span>';
+            redgifsContainer.innerHTML = '';
+            
+            try {
+                const data = await fetchJsonWithFallback(url);
+                const postData = data[0].data.children[0].data;
+                
+                redditContainer.innerHTML = '';
+
+                // Extract exact case-sensitive ID from thumbnail
+                let rgId = null;
+                const thumbUrl = postData.secure_media?.oembed?.thumbnail_url || postData.thumbnail;
+                if (thumbUrl) {
+                    const match = thumbUrl.match(/\/([a-zA-Z0-9]+)(?:-large|-mobile|-poster)?\.jpg/i);
+                    if (match) rgId = match[1]; // Case sensitive ID!
+                }
+                if (!rgId && postData.url) {
+                    const match = postData.url.match(/watch\/([a-zA-Z0-9]+)/i);
+                    if (match) rgId = match[1];
+                }
+
+                // 1. Display Reddit's Provided Links
+                const rLinks = [
+                    { label: 'Post URL', url: postData.url },
+                    { label: 'Preview Fallback', url: postData.preview?.reddit_video_preview?.fallback_url },
+                    { label: 'Preview MP4 Variant', url: postData.preview?.images?.[0]?.variants?.mp4?.source?.url }
+                ];
+
+                rLinks.forEach(link => {
+                    if (link.url) {
+                        redditContainer.appendChild(createMediaBlock(link.label, link.url));
+                    }
+                });
+
+                if (!rgId) {
+                    redgifsContainer.innerHTML = '<span class="text-red-400">Could not extract RedGIFs ID.</span>';
+                    return;
+                }
+
+                // 2. Test RedGIFs Direct CDN combinations
+                const rgLinks = [
+                    { label: 'HD (v3 CDN)', url: `https://v3.redgifs.com/${rgId}-hd.mp4` },
+                    { label: 'SD (v3 CDN)', url: `https://v3.redgifs.com/${rgId}.mp4` },
+                    { label: 'Mobile (v3 CDN)', url: `https://v3.redgifs.com/${rgId}-mobile.mp4` },
+                    { label: 'HD (Media CDN)', url: `https://media.redgifs.com/${rgId}-hd.mp4` },
+                    { label: 'SD (Media CDN)', url: `https://media.redgifs.com/${rgId}.mp4` }
+                ];
+
+                redgifsContainer.innerHTML = `<p class="text-yellow-400 font-mono text-xs mb-2">Extracted ID: ${rgId}</p>`;
+
+                rgLinks.forEach(link => {
+                    redgifsContainer.appendChild(createMediaBlock(link.label, link.url));
+                });
+
+            } catch (err) {
+                redditContainer.innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
+            }
+        }
+
+        function createMediaBlock(label, url) {
+            const div = document.createElement('div');
+            div.className = 'flex flex-col gap-1 p-3 bg-gray-900 rounded border border-gray-700';
+            
+            const title = document.createElement('span');
+            title.className = 'font-bold text-gray-300';
+            title.textContent = label;
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.target = '_blank';
+            link.className = 'text-blue-400 hover:underline break-all text-xs font-mono';
+            link.textContent = url;
+
+            const mediaContainer = document.createElement('div');
+            mediaContainer.className = 'mt-2 h-48 bg-black rounded flex items-center justify-center relative overflow-hidden';
+            
+            const status = document.createElement('span');
+            status.className = 'text-gray-500 text-xs absolute';
+            status.textContent = 'Loading...';
+
+            if (url.match(/\.(mp4|webm)$/i) || url.includes('fallback_url')) {
+                const video = document.createElement('video');
+                video.src = url;
+                video.controls = true;
+                video.className = 'max-h-full max-w-full z-10';
+                video.onloadeddata = () => status.textContent = '';
+                video.onerror = () => status.textContent = 'Failed to Load (403/404)';
+                mediaContainer.appendChild(status);
+                mediaContainer.appendChild(video);
+            } else {
+                status.textContent = 'Not a video URL';
+                mediaContainer.appendChild(status);
+            }
+
+            div.appendChild(title);
+            div.appendChild(link);
+            div.appendChild(mediaContainer);
+            return div;
+        }
+    </script>
+</body>
+</html>
