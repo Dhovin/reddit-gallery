@@ -375,46 +375,53 @@
         let isSettingsLoaded = false;
 
         async function loadSettingsFromServer() {
+            console.log("[DEBUG] loadSettingsFromServer: Requesting settings from server...");
             try {
                 const response = await fetch(`/api/settings?t=${Date.now()}`);
                 if (!response.ok) {
                     throw new Error(`Server returned HTTP ${response.status}`);
                 }
                 const data = await response.json();
-                    if (data && data.subreddits !== undefined) {
-                        subreddits = data.subreddits;
-                        blockedUsers = data.blockedUsers || [];
-                        favorites = data.favorites || [];
-                        presets = data.presets || DEFAULT_PRESETS;
+                if (data && data.subreddits !== undefined) {
+                    subreddits = data.subreddits;
+                    blockedUsers = data.blockedUsers || [];
+                    favorites = data.favorites || [];
+                    presets = data.presets || DEFAULT_PRESETS;
 
-                        // Keep localStorage in sync
-                        localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
-                        localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
-                        localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
-                        localStorage.setItem('reddit_presets', JSON.stringify(presets));
-                    } else {
-                        // First run / no server settings: try to migrate from browser localStorage
-                        const localSubs = localStorage.getItem('reddit_sources');
-                        if (localSubs) {
-                            try {
-                                subreddits = JSON.parse(localSubs);
-                                blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
-                                favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
-                                presets = JSON.parse(localStorage.getItem('reddit_presets') || 'null') || DEFAULT_PRESETS;
+                    console.log(`[INFO] loadSettingsFromServer: Successfully loaded settings from server. Subreddits: ${subreddits.length}, Favorites: ${favorites.length}`);
 
-                                // Save migrated settings to server immediately
-                                await saveSettingsToServer();
-                            } catch(e) {
-                                subreddits = DEFAULT_SUBS;
-                                presets = DEFAULT_PRESETS;
-                            }
-                        } else {
+                    // Keep localStorage in sync
+                    localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
+                    localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
+                    localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
+                    localStorage.setItem('reddit_presets', JSON.stringify(presets));
+                } else {
+                    // First run / no server settings: try to migrate from browser localStorage
+                    console.log("[INFO] loadSettingsFromServer: Server settings empty, checking browser localStorage for migration...");
+                    const localSubs = localStorage.getItem('reddit_sources');
+                    if (localSubs) {
+                        try {
+                            subreddits = JSON.parse(localSubs);
+                            blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
+                            favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
+                            presets = JSON.parse(localStorage.getItem('reddit_presets') || 'null') || DEFAULT_PRESETS;
+
+                            console.log(`[INFO] loadSettingsFromServer: Migrating settings from localStorage. Subreddits: ${subreddits.length}`);
+                            // Save migrated settings to server immediately
+                            await saveSettingsToServer();
+                        } catch(e) {
+                            console.error("[ERROR] loadSettingsFromServer: Failed to parse localStorage settings. Falling back to defaults.", e);
                             subreddits = DEFAULT_SUBS;
                             presets = DEFAULT_PRESETS;
+                        }
+                    } else {
+                        console.log("[INFO] loadSettingsFromServer: No server settings or localStorage found. Initializing defaults.");
+                        subreddits = DEFAULT_SUBS;
+                        presets = DEFAULT_PRESETS;
                     }
                 }
             } catch(e) {
-                console.error("Failed to load settings from server, using local fallback", e);
+                console.warn("[WARN] loadSettingsFromServer: Failed to load from server. Falling back to localStorage...", e);
                 // Fallback to localStorage
                 try {
                     subreddits = JSON.parse(localStorage.getItem('reddit_sources')) || DEFAULT_SUBS;
@@ -422,6 +429,7 @@
                     favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
                     presets = JSON.parse(localStorage.getItem('reddit_presets')) || DEFAULT_PRESETS;
                 } catch(err) {
+                    console.error("[ERROR] loadSettingsFromServer: Fallback to localStorage failed. Using hardcoded defaults.", err);
                     subreddits = DEFAULT_SUBS;
                     presets = DEFAULT_PRESETS;
                 }
@@ -431,6 +439,7 @@
         }
 
         async function saveSettingsToServer() {
+            console.log(`[DEBUG] saveSettingsToServer: Saving settings... Subreddits: ${subreddits.length}, Favorites: ${favorites.length}`);
             try {
                 // Keep localStorage as redundancy
                 localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
@@ -438,13 +447,19 @@
                 localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
                 localStorage.setItem('reddit_presets', JSON.stringify(presets));
 
-                await fetch('/api/settings', {
+                const response = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ subreddits, blockedUsers, favorites, presets })
                 });
+                
+                if (response.ok) {
+                    console.log("[INFO] saveSettingsToServer: Successfully saved settings to the server.");
+                } else {
+                    console.warn(`[WARN] saveSettingsToServer: Server failed to save settings. HTTP ${response.status}`);
+                }
             } catch(e) {
-                console.error("Failed to save settings to server", e);
+                console.error("[ERROR] saveSettingsToServer: Network error while saving settings to server:", e);
             }
         }
 
@@ -1421,6 +1436,7 @@
         async function fetchImages() {
             if (!isSettingsLoaded) return;
             const activeItems = subreddits.filter(s => s.active);
+            console.log("[INFO] fetchImages: Triggered loading feed for active sources:", activeItems.map(s => s.name));
             
             if (activeItems.length === 0) {
                 grid.innerHTML = '';
