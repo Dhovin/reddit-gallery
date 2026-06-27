@@ -378,10 +378,38 @@
                 const response = await fetch('/api/settings');
                 if (response.ok) {
                     const data = await response.json();
-                    if (data.subreddits) subreddits = data.subreddits;
-                    if (data.blockedUsers) blockedUsers = data.blockedUsers;
-                    if (data.favorites) favorites = data.favorites;
-                    if (data.presets) presets = data.presets;
+                    if (data && data.subreddits !== undefined) {
+                        subreddits = data.subreddits;
+                        blockedUsers = data.blockedUsers || [];
+                        favorites = data.favorites || [];
+                        presets = data.presets || DEFAULT_PRESETS;
+
+                        // Keep localStorage in sync
+                        localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
+                        localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
+                        localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
+                        localStorage.setItem('reddit_presets', JSON.stringify(presets));
+                    } else {
+                        // First run / no server settings: try to migrate from browser localStorage
+                        const localSubs = localStorage.getItem('reddit_sources');
+                        if (localSubs) {
+                            try {
+                                subreddits = JSON.parse(localSubs);
+                                blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
+                                favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
+                                presets = JSON.parse(localStorage.getItem('reddit_presets') || 'null') || DEFAULT_PRESETS;
+
+                                // Save migrated settings to server immediately
+                                await saveSettingsToServer();
+                            } catch(e) {
+                                subreddits = DEFAULT_SUBS;
+                                presets = DEFAULT_PRESETS;
+                            }
+                        } else {
+                            subreddits = DEFAULT_SUBS;
+                            presets = DEFAULT_PRESETS;
+                        }
+                    }
                 }
             } catch(e) {
                 console.error("Failed to load settings from server, using local fallback", e);
