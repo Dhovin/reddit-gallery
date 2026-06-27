@@ -372,6 +372,7 @@
         let subreddits = DEFAULT_SUBS;
         let blockedUsers = [];
         let favorites = [];
+        let isSettingsLoaded = false;
 
         async function loadSettingsFromServer() {
             try {
@@ -424,6 +425,8 @@
                     subreddits = DEFAULT_SUBS;
                     presets = DEFAULT_PRESETS;
                 }
+            } finally {
+                isSettingsLoaded = true;
             }
         }
 
@@ -655,7 +658,7 @@
 
         observer = new IntersectionObserver((entries) => {
             const entry = entries[0];
-            if (entry.isIntersecting && !isLoading && !isShowingFavorites) {
+            if (entry.isIntersecting && !isLoading && !isShowingFavorites && isSettingsLoaded) {
                 const activeItems = subreddits.filter(s => s.active);
                 const hasMore = activeItems.some(s => cursors[s.name] !== null);
                 if (hasMore) {
@@ -1416,6 +1419,7 @@
         }
 
         async function fetchImages() {
+            if (!isSettingsLoaded) return;
             const activeItems = subreddits.filter(s => s.active);
             
             if (activeItems.length === 0) {
