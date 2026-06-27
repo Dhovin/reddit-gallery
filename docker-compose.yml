@@ -13,3 +13,4 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
+      - CACHE_LIMIT_GB=2 # Optional: Customize cache size limit in GB (Default: 2)
