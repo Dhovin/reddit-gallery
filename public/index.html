@@ -1012,20 +1012,22 @@
             const isUser = rawName.toLowerCase().startsWith('u/');
 
             if (!isUser) {
-                cleanName = rawName.toLowerCase().replace(/^r\//, '');
+                // Keep original casing but remove r/ prefix if present
+                cleanName = rawName.replace(/^r\//i, '');
             } else {
-                 cleanName = rawName.toLowerCase();
+                 // Keep original casing but format with standard u/ prefix
+                 cleanName = 'u/' + rawName.substring(2);
             }
 
-            if (!subreddits.find(s => s.name === cleanName)) {
+            const existing = subreddits.find(s => s.name.toLowerCase() === cleanName.toLowerCase());
+            if (!existing) {
                 subreddits.push({ name: cleanName, active: true });
                 saveSources();
                 renderChips();
                 if (!isShowingFavorites) refreshFeed();
             } else {
-                const existing = subreddits.find(s => s.name === cleanName);
                 if (!existing.active) {
-                    toggleSubreddit(cleanName);
+                    toggleSubreddit(existing.name);
                 }
             }
         }
