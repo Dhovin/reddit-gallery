@@ -376,8 +376,10 @@
         async function loadSettingsFromServer() {
             try {
                 const response = await fetch('/api/settings');
-                if (response.ok) {
-                    const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(`Server returned HTTP ${response.status}`);
+                }
+                const data = await response.json();
                     if (data && data.subreddits !== undefined) {
                         subreddits = data.subreddits;
                         blockedUsers = data.blockedUsers || [];
