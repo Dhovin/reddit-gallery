@@ -1584,9 +1584,10 @@
                 }
 
                 if (rgId) {
-                    let hdSrc = `https://media.redgifs.com/${rgId}-hd.mp4`;
-                    let hdSrc2 = `https://v3.redgifs.com/${rgId}-hd.mp4`;
-                    let sdSrc = `https://media.redgifs.com/${rgId}.mp4`;
+                    let hdSrc = `https://media.redgifs.com/${rgId}.mp4`;
+                    let hdSrc2 = `https://v3.redgifs.com/${rgId}.mp4`;
+                    let sdSrc = `https://media.redgifs.com/${rgId}-mobile.mp4`;
+                    let sdSrc2 = `https://v3.redgifs.com/${rgId}-mobile.mp4`;
                     
                     let fallbackSrc2 = null;
                     if (data.preview && data.preview.reddit_video_preview && data.preview.reddit_video_preview.fallback_url) {
@@ -1601,7 +1602,7 @@
                         src: hdSrc, 
                         src2: hdSrc2,
                         fallbackSrc: sdSrc,
-                        fallbackSrc2: fallbackSrc2,
+                        fallbackSrc2: sdSrc2 || fallbackSrc2,
                         thumb 
                     });
                     return mediaItems;
@@ -1969,6 +1970,7 @@
                     item.src2,
                     item.fallbackSrc,
                     item.fallbackSrc2,
+                    item.src ? `/api/proxy?url=${encodeURIComponent(item.src)}` : null,
                     item.src ? `https://corsproxy.io/?${encodeURIComponent(item.src)}` : null
                 ].filter((v, i, a) => v && a.indexOf(v) === i);
 

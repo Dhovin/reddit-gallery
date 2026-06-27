@@ -369,16 +369,51 @@
             { name: 'art', active: false }
         ];
 
-        let subreddits = [];
+        let subreddits = DEFAULT_SUBS;
         let blockedUsers = [];
         let favorites = [];
 
-        try {
-            subreddits = JSON.parse(localStorage.getItem('reddit_sources')) || DEFAULT_SUBS;
-            blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
-            favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
-        } catch(e) {
-            subreddits = DEFAULT_SUBS;
+        async function loadSettingsFromServer() {
+            try {
+                const response = await fetch('/api/settings');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.subreddits) subreddits = data.subreddits;
+                    if (data.blockedUsers) blockedUsers = data.blockedUsers;
+                    if (data.favorites) favorites = data.favorites;
+                    if (data.presets) presets = data.presets;
+                }
+            } catch(e) {
+                console.error("Failed to load settings from server, using local fallback", e);
+                // Fallback to localStorage
+                try {
+                    subreddits = JSON.parse(localStorage.getItem('reddit_sources')) || DEFAULT_SUBS;
+                    blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
+                    favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
+                    presets = JSON.parse(localStorage.getItem('reddit_presets')) || DEFAULT_PRESETS;
+                } catch(err) {
+                    subreddits = DEFAULT_SUBS;
+                    presets = DEFAULT_PRESETS;
+                }
+            }
+        }
+
+        async function saveSettingsToServer() {
+            try {
+                // Keep localStorage as redundancy
+                localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
+                localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
+                localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
+                localStorage.setItem('reddit_presets', JSON.stringify(presets));
+
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subreddits, blockedUsers, favorites, presets })
+                });
+            } catch(e) {
+                console.error("Failed to save settings to server", e);
+            }
         }
 
         let selectedImages = new Set();
@@ -448,9 +483,18 @@
             });
         }
 
-        let workingProxyName = localStorage.getItem('reddit_working_proxy') || 'jsonp';
+        let workingProxyName = localStorage.getItem('reddit_working_proxy') || 'local-backend';
 
         const PROXY_STRATEGIES = [
+            {
+                name: 'local-backend',
+                test: () => true,
+                fetch: async (url, signal) => {
+                    const response = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`, { signal });
+                    if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+                    return await response.json();
+                }
+            },
             {
                 name: 'jsonp',
                 test: (url) => url.includes('reddit.com'),
@@ -565,7 +609,8 @@
 
         // --- Initialization ---
 
-        window.addEventListener('DOMContentLoaded', () => {
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadSettingsFromServer();
             renderChips();
             renderBlocked();
             updateFavCount();
@@ -838,7 +883,7 @@
                 modalBtn.innerHTML = isAdding ? '❤️' : '🤍';
             }
             
-            localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
+            saveSettingsToServer();
             updateFavCount();
         }
 
@@ -923,7 +968,7 @@
         }
 
         function saveBlocked() {
-            localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
+            saveSettingsToServer();
         }
 
         function renderBlocked() {
@@ -959,7 +1004,7 @@
         }
 
         function saveSources() {
-            localStorage.setItem('reddit_sources', JSON.stringify(subreddits));
+            saveSettingsToServer();
         }
 
         function addSource(rawName) {
@@ -967,20 +1012,22 @@
             const isUser = rawName.toLowerCase().startsWith('u/');
 
             if (!isUser) {
-                cleanName = rawName.toLowerCase().replace(/^r\//, '');
+                // Keep original casing but remove r/ prefix if present
+                cleanName = rawName.replace(/^r\//i, '');
             } else {
-                 cleanName = rawName.toLowerCase();
+                 // Keep original casing but format with standard u/ prefix
+                 cleanName = 'u/' + rawName.substring(2);
             }
 
-            if (!subreddits.find(s => s.name === cleanName)) {
+            const existing = subreddits.find(s => s.name.toLowerCase() === cleanName.toLowerCase());
+            if (!existing) {
                 subreddits.push({ name: cleanName, active: true });
                 saveSources();
                 renderChips();
                 if (!isShowingFavorites) refreshFeed();
             } else {
-                const existing = subreddits.find(s => s.name === cleanName);
                 if (!existing.active) {
-                    toggleSubreddit(cleanName);
+                    toggleSubreddit(existing.name);
                 }
             }
         }
@@ -1058,12 +1105,7 @@
             'Art': ['art']
         };
 
-        let presets = {};
-        try {
-            presets = JSON.parse(localStorage.getItem('reddit_presets')) || DEFAULT_PRESETS;
-        } catch(e) {
-            presets = DEFAULT_PRESETS;
-        }
+        let presets = DEFAULT_PRESETS;
 
         function togglePresetsSection() {
             const body = document.getElementById('presets-body');
@@ -1146,7 +1188,7 @@
             }
             
             presets[name] = activeTags;
-            localStorage.setItem('reddit_presets', JSON.stringify(presets));
+            saveSettingsToServer();
             inputEl.value = '';
             
             renderPresets();
@@ -1154,7 +1196,7 @@
 
         function deletePreset(name) {
             delete presets[name];
-            localStorage.setItem('reddit_presets', JSON.stringify(presets));
+            saveSettingsToServer();
             renderPresets();
         }
 
@@ -1542,9 +1584,10 @@
                 }
 
                 if (rgId) {
-                    let hdSrc = `https://media.redgifs.com/${rgId}-hd.mp4`;
-                    let hdSrc2 = `https://v3.redgifs.com/${rgId}-hd.mp4`;
-                    let sdSrc = `https://media.redgifs.com/${rgId}.mp4`;
+                    let hdSrc = `https://media.redgifs.com/${rgId}.mp4`;
+                    let hdSrc2 = `https://v3.redgifs.com/${rgId}.mp4`;
+                    let sdSrc = `https://media.redgifs.com/${rgId}-mobile.mp4`;
+                    let sdSrc2 = `https://v3.redgifs.com/${rgId}-mobile.mp4`;
                     
                     let fallbackSrc2 = null;
                     if (data.preview && data.preview.reddit_video_preview && data.preview.reddit_video_preview.fallback_url) {
@@ -1559,7 +1602,7 @@
                         src: hdSrc, 
                         src2: hdSrc2,
                         fallbackSrc: sdSrc,
-                        fallbackSrc2: fallbackSrc2,
+                        fallbackSrc2: sdSrc2 || fallbackSrc2,
                         thumb 
                     });
                     return mediaItems;
@@ -1927,6 +1970,7 @@
                     item.src2,
                     item.fallbackSrc,
                     item.fallbackSrc2,
+                    item.src ? `/api/proxy?url=${encodeURIComponent(item.src)}` : null,
                     item.src ? `https://corsproxy.io/?${encodeURIComponent(item.src)}` : null
                 ].filter((v, i, a) => v && a.indexOf(v) === i);
 

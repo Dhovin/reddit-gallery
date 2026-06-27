@@ -41,7 +41,7 @@ app.post('/api/settings', (req, res) => {
     }
 });
 
-// Built-in proxy to bypass CORS
+// Built-in proxy to bypass CORS and stream media
 app.get('/api/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) {
@@ -51,9 +51,12 @@ app.get('/api/proxy', async (req, res) => {
     try {
         // Validate target URL to prevent SSRF
         const parsedUrl = new URL(targetUrl);
-        if (!parsedUrl.hostname.endsWith('reddit.com') && 
-            !parsedUrl.hostname.endsWith('redditmedia.com') && 
-            !parsedUrl.hostname.endsWith('redd.it')) {
+        const allowedHosts = [
+            'reddit.com', 'redditmedia.com', 'redd.it',
+            'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com'
+        ];
+        const isAllowed = allowedHosts.some(host => parsedUrl.hostname === host || parsedUrl.hostname.endsWith('.' + host));
+        if (!isAllowed) {
             return res.status(403).json({ error: 'Forbidden target host' });
         }
 
@@ -64,11 +67,23 @@ app.get('/api/proxy', async (req, res) => {
         });
 
         if (!response.ok) {
-            return res.status(response.status).json({ error: `Reddit API returned HTTP ${response.status}` });
+            return res.status(response.status).json({ error: `Reddit/RedGIFS API returned HTTP ${response.status}` });
         }
 
-        const data = await response.json();
-        res.json(data);
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            const data = await response.json();
+            res.json(data);
+        } else {
+            // Stream binary media back to client
+            res.setHeader('Content-Type', contentType);
+            const contentLength = response.headers.get('content-length');
+            if (contentLength) {
+                res.setHeader('Content-Length', contentLength);
+            }
+            const { Readable } = require('stream');
+            Readable.fromWeb(response.body).pipe(res);
+        }
     } catch (err) {
         console.error('Proxy error:', err);
         res.status(500).json({ error: err.message || 'Failed to fetch' });
