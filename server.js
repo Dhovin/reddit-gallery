@@ -17,6 +17,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 // Load settings
 app.get('/api/settings', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     try {
         if (fs.existsSync(SETTINGS_FILE)) {
             const data = fs.readFileSync(SETTINGS_FILE, 'utf8');

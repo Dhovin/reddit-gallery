@@ -375,7 +375,7 @@
 
         async function loadSettingsFromServer() {
             try {
-                const response = await fetch('/api/settings');
+                const response = await fetch(`/api/settings?t=${Date.now()}`);
                 if (!response.ok) {
                     throw new Error(`Server returned HTTP ${response.status}`);
                 }
