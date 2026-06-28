@@ -2064,8 +2064,7 @@
                 let currentImgIdx = 0;
                 const imgOptions = [
                     getProxiedImageUrl(item.src),
-                    item.src,
-                    `https://corsproxy.io/?${encodeURIComponent(item.src)}`
+                    item.src
                 ].filter((v, i, a) => v && a.indexOf(v) === i);
 
                 modalImg.onload = () => {
