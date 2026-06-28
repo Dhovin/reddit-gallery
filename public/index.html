@@ -373,6 +373,7 @@
         let blockedUsers = [];
         let favorites = [];
         let isSettingsLoaded = false;
+        let failedSubreddits = new Set();
 
         async function loadSettingsFromServer() {
             console.log("[DEBUG] loadSettingsFromServer: Requesting settings from server...");
@@ -1113,8 +1114,13 @@
             activeSubs.forEach(sub => {
                 const chip = document.createElement('div');
                 const isUser = sub.name.startsWith('u/');
+                const isFailed = failedSubreddits.has(sub.name);
                 
-                chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-reddit/20 border-reddit text-reddit hover:bg-reddit/30 shrink-0`;
+                if (isFailed) {
+                    chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-red-950/20 border-red-500/50 text-red-400 hover:bg-red-950/30 shrink-0`;
+                } else {
+                    chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-reddit/20 border-reddit text-reddit hover:bg-reddit/30 shrink-0`;
+                }
                 
                 chip.onclick = () => {
                     toggleSubreddit(sub.name);
@@ -1124,11 +1130,14 @@
                 };
 
                 const span = document.createElement('span');
-                span.innerHTML = isUser ? `<span class="opacity-75">u/</span>${sub.name.substring(2)}` : `r/${sub.name}`;
+                const prefix = isUser ? `<span class="opacity-75">u/</span>${sub.name.substring(2)}` : `r/${sub.name}`;
+                span.innerHTML = isFailed ? `⚠️ ${prefix}` : prefix;
                 
                 const closeBtn = document.createElement('span');
                 closeBtn.innerHTML = '&times;';
-                closeBtn.className = `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-reddit font-bold text-sm`;
+                closeBtn.className = isFailed 
+                    ? `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-red-400 font-bold text-sm`
+                    : `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-reddit font-bold text-sm`;
                 closeBtn.onclick = (e) => {
                     e.stopPropagation();
                     toggleSubreddit(sub.name);
@@ -1308,10 +1317,11 @@
 
             filtered.forEach(sub => {
                 const isUser = sub.name.startsWith('u/');
+                const isFailed = failedSubreddits.has(sub.name);
                 const item = document.createElement('div');
                 item.className = `flex justify-between items-center p-2 rounded-lg border transition-colors cursor-pointer ${
                     sub.active 
-                    ? 'bg-reddit/5 border-reddit/40 hover:bg-reddit/10' 
+                    ? (isFailed ? 'bg-red-950/10 border-red-500/30 hover:bg-red-950/20' : 'bg-reddit/5 border-reddit/40 hover:bg-reddit/10')
                     : 'bg-transparent border-gray-700/50 hover:bg-white/5'
                 }`;
                 
@@ -1342,8 +1352,12 @@
                 nameSpan.textContent = isUser ? sub.name.substring(2) : sub.name;
                 
                 const typeSpan = document.createElement('span');
-                typeSpan.className = 'text-[10px] text-gray-500 uppercase tracking-wider font-bold';
-                typeSpan.textContent = isUser ? 'User' : 'Subreddit';
+                typeSpan.className = isFailed 
+                    ? 'text-[10px] text-red-400 uppercase tracking-wider font-bold' 
+                    : 'text-[10px] text-gray-500 uppercase tracking-wider font-bold';
+                typeSpan.textContent = isFailed 
+                    ? '⚠️ Error (Private/Banned/Typo)' 
+                    : (isUser ? 'User' : 'Subreddit');
                 
                 nameContainer.appendChild(nameSpan);
                 nameContainer.appendChild(typeSpan);
@@ -1421,6 +1435,7 @@
         // --- Data Fetching Logic ---
 
         async function refreshFeed() {
+            failedSubreddits.clear();
             cursors = {};
             grid.innerHTML = '';
             currentImageMap.clear();
@@ -1487,6 +1502,11 @@
                         return data.data.children;
                     } catch (e) {
                         console.error(`Error fetching ${item.name}`, e);
+                        failedSubreddits.add(item.name);
+                        renderChips();
+                        if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {
+                            renderTagsInManager();
+                        }
                         return [];
                     }
                 });
