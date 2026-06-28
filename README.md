@@ -7,12 +7,13 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 ## ✨ Features
 
 *   **Persistent Custom Tag Settings**: Saves active subreddits, user accounts, custom presets, blocks, and favorites.
-*   **Built-in CORS Media & API Proxy**: Intercepts requests to Reddit API/media hosts and streams them seamlessly, bypassing typical browser CORS restrictions.
+*   **100% Private Local Proxy**: Completely free from third-party public CORS proxies (`corsproxy.io`, `allorigins`) and image resizers (`wsrv.nl`). All traffic is routed directly through your own local server backend proxy (`/api/proxy`).
+*   **Local Media & Thumbnail Caching**: Stores proxied preview thumbnails, high-res images, and video streams in the container's AppData directory. Future requests load instantly from local server storage, saving internet bandwidth.
+*   **Automatic Cache Pruning (LRU)**: Implements an LRU (Least Recently Used) cache manager that automatically deletes oldest cached files when storage limits are reached.
 *   **RedGIFs v3 CDN Support**: Integrates the updated HD/SD video URL naming scheme for smooth RedGIFs playback.
-*   **Local Media Caching (LRU)**: Proxied media files are stored locally in the container's data folder. Future requests load instantly from disk, saving massive internet bandwidth and resolving hotlink timeouts.
-*   **Automatic Cache Pruning**: Implements an LRU (Least Recently Used) cache manager that automatically deletes oldest cached files when storage limits are hit.
-*   **Responsive Masonry Grid**: Mobile and tablet-friendly gallery interface with infinite scrolling.
-*   **Interactive Modal**: Media viewer with auto-play slideshow timer, loop video controls, and keydown navigation (`Escape`, `ArrowLeft`, `ArrowRight`).
+*   **Interactive Tag Error Warnings**: Feeds that fail (due to spelling typos like `higheelsnsfw` or private/banned subreddits like `classygals`) are highlighted in the top bar with red warning chips (⚠️) and clear descriptions inside the tag manager.
+*   **Responsive Masonry Grid**: Mobile, desktop, and tablet-friendly gallery interface with infinite scrolling.
+*   **Interactive Modal**: Media viewer with auto-play slideshow timer, loop video controls, and keyboard navigation (`Escape`, `ArrowLeft`, `ArrowRight`).
 
 ---
 

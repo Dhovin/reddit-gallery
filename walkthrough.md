@@ -13,17 +13,19 @@ I have completed the tasks to containerize the Reddit Gallery application, estab
 ### 2. Node.js/Express Backend Server
 * **Created [package.json](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/package.json)**: Declared the Express dependency and start scripts.
 * **Created [server.js](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/server.js)**:
-  * **Settings Endpoint**: Serves `GET /api/settings` and `POST /api/settings` which saves user configuration (active subreddits, favorites list, blocked users, presets) into a structured JSON file at `/app/data/settings.json`.
-  * **Built-in CORS Proxy**: Provides a `/api/proxy?url=...` endpoint. It intercepts calls to Reddit API hosts and forwards them with a desktop browser user-agent to bypass CORS limits.
+  * **Settings Endpoint**: Serves `GET /api/settings` and `POST /api/settings` which saves user configuration into a structured JSON file at `/app/data/settings.json`.
+  * **Built-in CORS & Media Proxy**: Provides a `/api/proxy?url=...` endpoint. It forwards calls with a browser user-agent to bypass blocks, whitelist hosts (reddit, imgur, redgifs), streams video chunks, and caches files locally to disk under `/app/data/cache`.
 
-### 3. Frontend Refactoring
+### 3. Frontend Refactoring & Local Proxy Only
 * **Moved and Refactored [public/index.html](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/public/index.html)**:
-  * **Transparent Auto-Sync**: Added `loadSettingsFromServer()` and `saveSettingsToServer()` routines. Settings are loaded from the backend before any UI loads, and changes (adding subreddits, favorites, blocking users, saving presets) trigger silent background POST updates.
-  * **Integrated Local Proxy**: Added the `local-backend` strategy to the top of `PROXY_STRATEGIES` as the primary fetch method. If it encounters a network block, it falls back seamlessly to `jsonp` which continues to run directly in the browser.
+  * **Transparent Auto-Sync**: Automatically loads settings from the backend on load and syncs changes back via background POST calls.
+  * **100% Private local-only Proxy**: Removed all references to external public CORS proxies (`corsproxy.io`, `allorigins`, `yacdn`, `thingproxy`).
+  * **Full Thumbnail Caching**: Replaced `wsrv.nl` image resizing calls with local proxy routing. This keeps thumbnail fetching private and stores preview card images on your local disk cache for instant future loads.
+  * **Interactive Tag Warnings**: Added front-end validation tracking. If a subreddit feed fails due to spelling typos (like `higheelsnsfw`) or private/banned states (like `classygals`), the tag chip renders in red with a warning icon (⚠️) and shows a description in the tag manager so you can prune it.
 
 ### 4. Dockerization
-* **Created [Dockerfile](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/Dockerfile)**: Uses a super lightweight `node:20-alpine` base image, copies only the required runtime files (`server.js`, `package.json`, and the `public/` directory), defines the `/app/data` volume mount point, and exposes port `3000`.
-* **Created [docker-compose.yml](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/docker-compose.yml)**: Configures the build context, binds port `3000:3000`, exposes the image name as `dhovin/reddit-gallery:latest`, and maps `./data` on the host to `/app/data` inside the container.
+* **Created [Dockerfile](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/Dockerfile)**: Uses a lightweight `node:20-alpine` base image, copies required codebase files, defines the `/app/data` persistent storage volume, and exposes port `3000`.
+* **Created [docker-compose.yml](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/docker-compose.yml)**: Configures container building, exposes port `3000`, maps local `./data` to `/app/data`, and exposes environment configuration like `CACHE_LIMIT_GB` for the LRU cache pruner.
 
 ---
 
