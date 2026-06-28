@@ -131,7 +131,8 @@ app.get('/api/proxy', async (req, res) => {
         const parsedUrl = new URL(targetUrl);
         const allowedHosts = [
             'reddit.com', 'redditmedia.com', 'redd.it',
-            'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com'
+            'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com', 'thumbs2.redgifs.com',
+            'imgur.com', 'i.imgur.com'
         ];
         const isAllowed = allowedHosts.some(host => parsedUrl.hostname === host || parsedUrl.hostname.endsWith('.' + host));
         if (!isAllowed) {

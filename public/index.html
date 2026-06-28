@@ -1779,8 +1779,8 @@
                 const srcOptions = [
                     getProxiedImageUrl(firstMedia.thumb),
                     firstMedia.thumb,
-                    getProxiedImageUrl(firstMedia.src),
-                    firstMedia.src
+                    firstMedia.type !== 'video' ? getProxiedImageUrl(firstMedia.src) : null,
+                    firstMedia.type !== 'video' ? firstMedia.src : null
                 ].filter((v, i, a) => v && a.indexOf(v) === i);
 
                 mediaElem.onerror = () => {
@@ -2014,14 +2014,28 @@
                 modalVideo.innerHTML = '';
                 modalVideo.removeAttribute('src');
 
-                const sources = [
-                    item.src,
-                    item.src2,
-                    item.fallbackSrc,
-                    item.fallbackSrc2,
-                    item.src ? `/api/proxy?url=${encodeURIComponent(item.src)}` : null,
-                    item.src ? `https://corsproxy.io/?${encodeURIComponent(item.src)}` : null
-                ].filter((v, i, a) => v && a.indexOf(v) === i);
+                let sources = [];
+                if (item.src && item.src.includes('redgifs.com')) {
+                    // Prioritize local proxy for RedGIFs to play instantly and avoid CDN 403 blocks
+                    sources = [
+                        `/api/proxy?url=${encodeURIComponent(item.src)}`,
+                        item.src,
+                        item.src2,
+                        item.fallbackSrc,
+                        item.fallbackSrc2,
+                        `https://corsproxy.io/?${encodeURIComponent(item.src)}`
+                    ];
+                } else {
+                    sources = [
+                        item.src,
+                        item.src2,
+                        item.fallbackSrc,
+                        item.fallbackSrc2,
+                        item.src ? `/api/proxy?url=${encodeURIComponent(item.src)}` : null,
+                        item.src ? `https://corsproxy.io/?${encodeURIComponent(item.src)}` : null
+                    ];
+                }
+                sources = sources.filter((v, i, a) => v && a.indexOf(v) === i);
 
                 let currentVideoSrcIdx = 0;
 
