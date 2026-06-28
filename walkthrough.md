@@ -78,3 +78,9 @@ We have implemented a local media caching system on the server:
   * **Custom Limit**: You can change this limit by adding a custom Environment Variable in your unRaid container template:
     * **Key**: `CACHE_LIMIT_GB`
     * **Value**: Number of gigabytes (e.g., `5` for 5 GB, `10` for 10 GB).
+
+---
+
+## 🔒 Security Notice
+* **LAN Only**: This application is meant to run in a private, trusted local network. Do not expose this port directly to the internet.
+* **External Access**: If you wish to access the gallery remotely, use a secure VPN (like WireGuard or Tailscale) or route it through an authenticating reverse proxy (like Nginx Proxy Manager + Authelia).

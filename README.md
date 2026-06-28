@@ -81,6 +81,19 @@ To run this container on unRaid:
 
 ---
 
+## 🔒 Security & Privacy Recommendations
+
+This application is designed specifically for **trusted private local networks** (LANs) and lacks built-in authentication layers. 
+
+> [!WARNING]
+> **Do not expose this container directly to the public internet** (e.g., via direct DMZ port forwarding). Doing so would allow anyone to modify your settings or abuse your local proxy.
+
+To access your gallery securely from outside your home network, it is recommended to use:
+*   **A Private VPN**: Set up **WireGuard** or **Tailscale** on your unRaid server to tunnel safely into your home network.
+*   **An Authenticating Reverse Proxy**: Run a reverse proxy like **Nginx Proxy Manager**, **Traefik**, or **Caddy** integrated with an authentication provider (such as **Authelia**, **Authentik**, or **Cloudflare Tunnel Access**) to force a login screen before the traffic reaches this container.
+
+---
+
 ## 📂 File Layout
 
 *   `server.js`: Express app serving static files, settings API, and CORS streaming/caching proxy.

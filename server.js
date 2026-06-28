@@ -11,6 +11,16 @@ const CACHE_DIR = path.join(DATA_DIR, 'cache');
 const CACHE_LIMIT = (parseInt(process.env.CACHE_LIMIT_GB) || 2) * 1024 * 1024 * 1024; // Default 2 GB
 
 app.use(express.json({ limit: '10mb' }));
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Ensure data directory exists

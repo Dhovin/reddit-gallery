@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reddit Image Grid</title>
+    <meta name="referrer" content="no-referrer">
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -1007,15 +1008,19 @@
         }
 
         function addSource(rawName) {
-            let cleanName = rawName;
-            const isUser = rawName.toLowerCase().startsWith('u/');
+            // Input Sanitization: allow only alphanumeric, underscores, hyphens, and slashes
+            const sanitized = rawName.replace(/[^a-zA-Z0-9_\-\/]/g, '').trim();
+            if (!sanitized) return;
+
+            let cleanName = sanitized;
+            const isUser = sanitized.toLowerCase().startsWith('u/');
 
             if (!isUser) {
                 // Keep original casing but remove r/ prefix if present
-                cleanName = rawName.replace(/^r\//i, '');
+                cleanName = sanitized.replace(/^r\//i, '');
             } else {
                  // Keep original casing but format with standard u/ prefix
-                 cleanName = 'u/' + rawName.substring(2);
+                 cleanName = 'u/' + sanitized.substring(2);
             }
 
             const existing = subreddits.find(s => s.name.toLowerCase() === cleanName.toLowerCase());
