@@ -12,5 +12,7 @@ services:
       - ./data:/app/data
     environment:
       - PORT=3000
+      - PUID=99          # Map host user UID for unRaid permission mapping (nobody)
+      - PGID=100         # Map host group GID (users)
+      - CACHE_LIMIT_GB=2 # Max local media cache limit in Gigabytes
       - NODE_ENV=production
-      - CACHE_LIMIT_GB=2 # Optional: Customize cache size limit in GB (Default: 2)

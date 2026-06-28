@@ -6,78 +6,68 @@ I have completed the tasks to containerize the Reddit Gallery application, estab
 
 ## 🛠️ Changes Implemented
 
-### 1. Repository & Git Setup
-* **Created [.gitignore](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/.gitignore)**: Configured it to ignore dependency folders (`node_modules/`) and local runtime data (`data/`), keeping settings private and lightweight.
-* **Git Repository Initialization**: Initialized a local git repository on the `main` branch, staged all project files, and pushed the commit directly to your GitHub remote repository [Dhovin/reddit-gallery](https://github.com/Dhovin/reddit-gallery.git).
+### 1. Frontend Refactoring (Vite + React)
+*   **Vite Setup**: Added `vite.config.js`, `postcss.config.js`, and `tailwind.config.js` to build and compile static assets.
+*   **React Components**: Split the codebase into clean components:
+    *   `src/components/Header.jsx`: Manages header elements, presets, active chips, and custom lists.
+    *   `src/components/Grid.jsx`: Implements a multi-column masonry grid layout with an infinite scroll intersection observer sentinel.
+    *   `src/components/Card.jsx`: Manages individual card rendering, overlay hover titles, action links, and local image fallback failovers.
+    *   `src/components/Modal.jsx`: Fullscreen media player, loops, slideshow timers, and key listeners (`ArrowLeft`/`Right`/`Escape`).
+    *   `src/components/TagManager.jsx`: Tags selection and preset drawers with error warnings.
+    *   `src/App.jsx`: Global state orchestrator.
 
-### 2. Node.js/Express Backend Server
-* **Created [package.json](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/package.json)**: Declared the Express dependency and start scripts.
-* **Created [server.js](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/server.js)**:
-  * **Settings Endpoint**: Serves `GET /api/settings` and `POST /api/settings` which saves user configuration into a structured JSON file at `/app/data/settings.json`.
-  * **Built-in CORS & Media Proxy**: Provides a `/api/proxy?url=...` endpoint. It forwards calls with a browser user-agent to bypass blocks, whitelist hosts (reddit, imgur, redgifs), streams video chunks, and caches files locally to disk under `/app/data/cache`.
+### 2. Backend Server & Database Refactoring
+*   **Node 22 + SQLite (`node:sqlite`)**: Refactored `server.js` to utilize Node 22's native experimental SQLite module. Settings (subreddits, blockedUsers, favorites, presets) are stored safely in `/app/data/settings.db`.
+*   **Auto-Migration**: Added a startup checker that reads the legacy `settings.json`, migrates configurations into the new SQLite database, and renames the file to `settings.json.bak` to secure migration.
+*   **Proxy Endpoint**: Refactored `/api/proxy` to validate request URLs against allowed hosts and stream media back setting standard cache-control headers.
 
-### 3. Frontend Refactoring & Local Proxy Only
-* **Moved and Refactored [public/index.html](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/public/index.html)**:
-  * **Transparent Auto-Sync**: Automatically loads settings from the backend on load and syncs changes back via background POST calls.
-  * **100% Private local-only Proxy**: Removed all references to external public CORS proxies (`corsproxy.io`, `allorigins`, `yacdn`, `thingproxy`).
-  * **Full Thumbnail Caching**: Replaced `wsrv.nl` image resizing calls with local proxy routing. This keeps thumbnail fetching private and stores preview card images on your local disk cache for instant future loads.
-  * **Interactive Tag Warnings**: Added front-end validation tracking. If a subreddit feed fails due to spelling typos (like `higheelsnsfw`) or private/banned states (like `classygals`), the tag chip renders in red with a warning icon (⚠️) and shows a description in the tag manager so you can prune it.
+### 3. Nginx Caching & Proxy Engine
+*   **Nginx Configuration**: Added `nginx.conf` to serve built React files statically on port `3000` and proxy `/api/proxy` media requests to Node.js on port `3031`.
+*   **High Performance Cache**: Configured Nginx `proxy_cache` on the `/api/proxy` endpoint, delegating image/video disk caching and LRU pruning to Nginx (C-based speeds), completely removing caching workload from the Node process.
 
-### 4. Dockerization
-* **Created [Dockerfile](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/Dockerfile)**: Uses a lightweight `node:20-alpine` base image, copies required codebase files, defines the `/app/data` persistent storage volume, and exposes port `3000`.
-* **Created [docker-compose.yml](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/docker-compose.yml)**: Configures container building, exposes port `3000`, maps local `./data` to `/app/data`, and exposes environment configuration like `CACHE_LIMIT_GB` for the LRU cache pruner.
+### 4. unRaid Permissions Mapping & Dropping Root
+*   **Created [entrypoint.sh](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/entrypoint.sh)**: A wrapper script that reads `PUID` and `PGID` from environment variables, edits the container's local `node` user credentials to match, runs `chown` on the data directories to fix host permissions for unRaid (`nobody:users`), and starts Nginx and Node.js using `su-exec` to drop privileges.
+*   **Refactored [Dockerfile](file:///c:/Users/dhovi/Desktop/Reddit%20Gallery/Dockerfile)**: Multi-stage configuration building Vite files in stage 1, and compiling a slim Alpine final runner in stage 2 installing Nginx, su-exec, and shadow.
 
 ---
 
 ## 🧪 Verification Results
 
-1. **Local Server Verification**: Started the server on local host, verified endpoints returned correct default states.
-2. **Settings Persistence Test**: Executed a `POST /api/settings` request to save active subreddits, which successfully generated a formatted `data/settings.json` file on the host.
-3. **Docker Compose Run**: Successfully ran the containerized application. The settings saved in local test were correctly loaded from the mounted volume by the Docker container on startup.
-4. **Git Repository Push**: Staged all assets and pushed code successfully to your GitHub repository `https://github.com/Dhovin/reddit-gallery.git`.
+1.  **Vite Build**: Compiled client assets successfully into `dist/` (generating optimized JS/CSS bundles).
+2.  **Docker Build & Run**: Built multi-stage Docker image and verified container starts up correctly.
+3.  **Local settings DB**: SQLite initialized the `settings` database tables and successfully wrote settings to `/app/data/settings.db`.
+4.  **Auto-Migration test**: Validated that `settings.json` is parsed, stored into the SQLite tables, and renamed to `.bak` at server boot.
+5.  **Caching proxy test**: Opened browser Developer Tools and verified that subsequent proxy requests return `X-Cache-Status: HIT` from Nginx.
 
 ---
 
 ## 🚀 unRaid Deployment Steps
 
-You can now set this up on your unRaid server using one of the following two paths:
+You can now set this up on your unRaid server:
 
-### Option A: Using the Docker Compose Manager Plugin
-*If you prefer using Docker Compose on unRaid:*
-1. Copy the project files (specifically `docker-compose.yml`, `Dockerfile`, `server.js`, `package.json`, and `public/index.html`) to a directory on your unRaid flash/disk (e.g. `/mnt/user/appdata/reddit-gallery`).
-2. Go to the **Docker** tab in unRaid, scroll to the bottom, and click **Add New Project** under the Docker Compose section.
-3. Name it `reddit-gallery`, point it to the folder you created, and select **Build** and **Up**.
-
-### Option B: Using the unRaid Native GUI Add Container
-*If you prefer the standard unRaid web interface:*
-1. On your desktop, build and push the Docker image to Docker Hub (or build it directly on unRaid via CLI):
-   ```bash
-   docker build -t dhovin/reddit-gallery:latest .
-   docker push dhovin/reddit-gallery:latest
-   ```
-2. Navigate to unRaid's **Docker** tab and click **Add Container**.
-3. Fill out the configuration form:
-   * **Name**: `reddit-gallery`
-   * **Repository**: `dhovin/reddit-gallery:latest`
-   * **Network Type**: `Bridge`
-   * **Port Connection (Host:Container)**: `3000:3000`
-   * **Path Mapping (Host:Container)**:
-     * **Container Path**: `/app/data`
-     * **Host Path**: `/mnt/user/appdata/reddit-gallery`
-     * **Access Mode**: `Read/Write`
-4. Click **Apply** to pull the image and run the container.
+1.  Navigate to unRaid's **Docker** tab and click **Add Container**.
+2.  Fill out the configuration form:
+    *   **Name**: `reddit-gallery`
+    *   **Repository**: `dhovin/reddit-gallery:latest`
+    *   **Network Type**: `Bridge`
+    *   **Port Connection (Host:Container)**: `3000:3000`
+    *   **Path Mapping (Host:Container)**:
+        *   **Container Path**: `/app/data`
+        *   **Host Path**: `/mnt/user/appdata/reddit-gallery`
+        *   **Access Mode**: `Read/Write`
+3.  **Add environment variables for Permissions Mapping**:
+    *   Add **PUID**: Config Type `Variable`, Name `PUID`, Key `PUID`, Value `99` (nobody).
+    *   Add **PGID**: Config Type `Variable`, Name `PGID`, Key `PGID`, Value `100` (users).
+4.  **Add environment variable for Caching Limit**:
+    *   Add **Cache Limit**: Config Type `Variable`, Name `Cache Limit (GB)`, Key `CACHE_LIMIT_GB`, Value `2` (sets maximum disk space for local media caching).
+5.  Click **Apply** to pull the image and run the container.
 
 ---
 
-## 💾 Server-Side Media Caching (LRU)
-We have implemented a local media caching system on the server:
-* **How it works**: Media requests routed through the proxy `/api/proxy` (which is used as the high-priority fallback for videos and images) are cached under `/app/data/cache/`. The next time you load the gallery, these images and videos stream directly from your unRaid server, cutting out external loading times entirely.
-* **Storage Protection**: The cache is self-cleaning and implements an LRU (Least Recently Used) pruning policy. It checks the folder size on server startup and after every cache write.
-* **Cache Limit Configuration**:
-  * **Default limit**: `2 GB`.
-  * **Custom Limit**: You can change this limit by adding a custom Environment Variable in your unRaid container template:
-    * **Key**: `CACHE_LIMIT_GB`
-    * **Value**: Number of gigabytes (e.g., `5` for 5 GB, `10` for 10 GB).
+## 💾 Server-Side Media Caching (Nginx)
+Media requests routed through the proxy `/api/proxy` are cached by Nginx's native caching engine:
+*   **How it works**: Media files are cached under `/app/data/cache/`. Future requests load instantly from Nginx cache, bypassing the Node backend entirely and speeding up video playback.
+*   **Storage protection**: The cache is self-managed by Nginx using your configured `CACHE_LIMIT_GB` environment variable. Nginx handles LRU eviction natively.
 
 ---
 

@@ -6,10 +6,11 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 ## ✨ Features
 
-*   **Persistent Custom Tag Settings**: Saves active subreddits, user accounts, custom presets, blocks, and favorites.
-*   **100% Private Local Proxy**: Completely free from third-party public CORS proxies (`corsproxy.io`, `allorigins`) and image resizers (`wsrv.nl`). All traffic is routed directly through your own local server backend proxy (`/api/proxy`).
-*   **Local Media & Thumbnail Caching**: Stores proxied preview thumbnails, high-res images, and video streams in the container's AppData directory. Future requests load instantly from local server storage, saving internet bandwidth.
-*   **Automatic Cache Pruning (LRU)**: Implements an LRU (Least Recently Used) cache manager that automatically deletes oldest cached files when storage limits are reached.
+*   **Vite + React Component Architecture**: Modular, high-performance React UI utilizing compiled utility stylesheets (Tailwind) for optimal rendering speeds.
+*   **Native SQLite Database**: Employs Node 22's built-in `node:sqlite` module for settings data, eliminating file corruption and resolving unRaid root permissions issues.
+*   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the new SQLite database (`settings.db`) on startup.
+*   **Nginx Reverse Proxy & Native Cache**: Integrates Nginx directly in the Docker container to serve static assets and cache media streams (`/api/proxy`) in native C code, maximizing transfer rates and caching performance.
+*   **Permissions Mapping (PUID/PGID)**: Startup script dynamically adjusts volume directories' ownership to your unRaid UID/GID (e.g. `99:100` / `nobody:users`), resolving file lock/permission problems.
 *   **RedGIFs v3 CDN Support**: Integrates the updated HD/SD video URL naming scheme for smooth RedGIFs playback.
 *   **Interactive Tag Error Warnings**: Feeds that fail (due to spelling typos like `higheelsnsfw` or private/banned subreddits like `classygals`) are highlighted in the top bar with red warning chips (⚠️) and clear descriptions inside the tag manager.
 *   **Responsive Masonry Grid**: Mobile, desktop, and tablet-friendly gallery interface with infinite scrolling.
@@ -21,7 +22,8 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
-| `PORT` | The port the Node.js server listens on inside the container. | `3000` |
+| `PUID` | Host User ID to map container volumes for unRaid host file permission sync. | `99` (nobody) |
+| `PGID` | Host Group ID to map container volumes for unRaid host file permission sync. | `100` (users) |
 | `CACHE_LIMIT_GB` | The maximum storage size allocated for local media caching in Gigabytes. | `2` |
 
 ---
@@ -45,7 +47,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - PORT=3000
+      - PUID=99          # Set to your unRaid user UID (nobody is 99)
+      - PGID=100         # Set to your unRaid group GID (users is 100)
       - CACHE_LIMIT_GB=2  # Change this to set custom caching storage size in GB
 ```
 
@@ -70,14 +73,13 @@ To run this container on unRaid:
         *   **Container Path**: `/app/data`
         *   **Host Path**: `/mnt/user/appdata/reddit-gallery`
         *   **Access Mode**: `Read/Write`
-3.  **(Optional) Add Cache Limit Config**:
+3.  **Add Permissions Mapping (PUID & PGID)**:
     *   Click **Add another Path, Port, Variable, Label or Device** at the bottom.
-    *   Set **Config Type** to `Variable`.
-    *   Set **Name** to `Cache Limit (GB)`.
-    *   Set **Key** to `CACHE_LIMIT_GB`.
-    *   Set **Value** to your desired limit in GB (e.g., `5` for 5 GB).
-    *   Click **Add**.
-4.  Click **Apply** to deploy the container.
+    *   Add **PUID**: Config Type `Variable`, Name `PUID`, Key `PUID`, Value `99`.
+    *   Add **PGID**: Config Type `Variable`, Name `PGID`, Key `PGID`, Value `100`.
+4.  **(Optional) Add Cache Limit Config**:
+    *   Add **Cache Limit (GB)**: Config Type `Variable`, Name `Cache Limit (GB)`, Key `CACHE_LIMIT_GB`, Value `2` (or your preferred size in GB).
+5.  Click **Apply** to deploy the container.
 
 ---
 
@@ -96,7 +98,9 @@ To access your gallery securely from outside your home network, it is recommende
 
 ## 📂 File Layout
 
-*   `server.js`: Express app serving static files, settings API, and CORS streaming/caching proxy.
-*   `public/index.html`: Main frontend client with custom tag managers and interactive modal.
-*   `data/settings.json`: File stored on the host containing your custom configurations.
+*   `server.js`: Node.js Express backend serving APIs and validating CORS proxy requests.
+*   `nginx.conf`: Nginx web server configuration serving static React files and handling media file caching.
+*   `entrypoint.sh`: Privilege dropping startup wrapper for PUID/PGID filesystem sync.
+*   `src/`: Vite React frontend client files (components, styles, and logic).
+*   `data/settings.db`: Local SQLite database storing custom configurations.
 *   `data/cache/`: Folder containing cached binary media files.
