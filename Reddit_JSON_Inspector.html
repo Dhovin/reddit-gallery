@@ -162,6 +162,13 @@
                     links.push(`[Reddit Video Fallback] \n<a href="${postData.media.reddit_video.fallback_url}" target="_blank" class="text-pink-300 hover:underline">${postData.media.reddit_video.fallback_url}</a>`);
                 }
 
+                if (postData.is_gallery && postData.media_metadata) {
+                    Object.entries(postData.media_metadata).forEach(([id, meta]) => {
+                        let url = meta.s?.mp4 || meta.s?.u || meta.s?.gif || meta.hlsUrl || `https://v.redd.it/${id}/DASH_1080.mp4`;
+                        links.push(`[Gallery Item (${meta.e || 'Media'} - ${id})] \n<a href="${url}" target="_blank" class="text-amber-300 hover:underline">${url}</a>`);
+                    });
+                }
+
                 const ul = document.getElementById('media-links');
                 ul.innerHTML = '';
                 if (links.length === 0) {

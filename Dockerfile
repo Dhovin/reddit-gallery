@@ -1,53 +1,34 @@
-# Stage 1: Build the Vite React Frontend
-FROM node:22-alpine AS builder
-
-WORKDIR /app
-
-# Copy dependency configs
-COPY package*.json ./
-
-# Install all dependencies (including devDependencies for building)
-RUN npm install
-
-# Copy source code files
-COPY vite.config.js tailwind.config.js postcss.config.js index.html ./
-COPY src/ ./src/
-
-# Compile the React production bundle to dist/
-RUN npm run build
-
-
-# Stage 2: Final Light Runtime Image
+# Use Node 22 Alpine (supporting native SQLite)
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Install runtime utilities: nginx (web server), su-exec (privilege dropper), shadow (for usermod/groupmod)
-RUN apk add --no-cache nginx su-exec shadow
+# Install runtime utilities: su-exec (privilege dropper), shadow (for usermod/groupmod)
+RUN apk add --no-cache su-exec shadow
 
-# Copy backend dependencies
+# Copy dependency files
 COPY package*.json ./
+
+# Install only production dependencies
 RUN npm install --only=production
 
-# Copy built frontend assets from builder stage
-COPY --from=builder /app/dist ./dist
-
-# Copy backend server code and startup script
+# Copy application files and folders
 COPY server.js ./
-COPY nginx.conf ./
 COPY entrypoint.sh ./
+COPY public/ ./public/
 
-# Move Nginx config to system config path
-RUN mv nginx.conf /etc/nginx/nginx.conf
-
-# Set permissions for startup script
+# Set execution permissions on entrypoint wrapper
 RUN chmod +x entrypoint.sh
 
-# Expose Nginx frontend port (3000)
+# Expose Node backend port
 EXPOSE 3000
 
-# Declare persistent data volume
+# Declare data volume path
 VOLUME ["/app/data"]
 
-# Run the entrypoint script
+# Health check for Docker and unRaid monitoring
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+
+# Run startup script
 ENTRYPOINT ["/app/entrypoint.sh"]
