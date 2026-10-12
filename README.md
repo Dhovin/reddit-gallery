@@ -6,15 +6,15 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 ## ✨ Features
 
-*   **Vite + React Component Architecture**: Modular, high-performance React UI utilizing compiled utility stylesheets (Tailwind) for optimal rendering speeds.
-*   **Native SQLite Database**: Employs Node 22's built-in `node:sqlite` module for settings data, eliminating file corruption and resolving unRaid root permissions issues.
-*   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the new SQLite database (`settings.db`) on startup.
-*   **Nginx Reverse Proxy & Native Cache**: Integrates Nginx directly in the Docker container to serve static assets and cache media streams (`/api/proxy`) in native C code, maximizing transfer rates and caching performance.
-*   **Permissions Mapping (PUID/PGID)**: Startup script dynamically adjusts volume directories' ownership to your unRaid UID/GID (e.g. `99:100` / `nobody:users`), resolving file lock/permission problems.
-*   **RedGIFs v3 CDN Support**: Integrates the updated HD/SD video URL naming scheme for smooth RedGIFs playback.
-*   **Interactive Tag Error Warnings**: Feeds that fail (due to spelling typos like `higheelsnsfw` or private/banned subreddits like `classygals`) are highlighted in the top bar with red warning chips (⚠️) and clear descriptions inside the tag manager.
-*   **Responsive Masonry Grid**: Mobile, desktop, and tablet-friendly gallery interface with infinite scrolling.
-*   **Interactive Modal**: Media viewer with auto-play slideshow timer, loop video controls, and keyboard navigation (`Escape`, `ArrowLeft`, `ArrowRight`).
+*   **Zero-Build Single-Page Frontend**: Fast, self-contained HTML/JS interface (`public/index.html`) styled with Tailwind CSS, requiring no complex client build step.
+*   **Native SQLite Database**: Employs Node 22's built-in `node:sqlite` module for settings data (`settings.db`), eliminating file corruption and resolving unRaid root permission issues.
+*   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the SQLite database (`settings.db`) on startup.
+*   **Streaming Media Proxy & Local LRU Cache**: Streams and caches media requests (`/api/proxy`) directly to disk (`/app/data/cache`) with automatic LRU cache pruning based on `CACHE_LIMIT_GB`.
+*   **Zero-RAM Streaming ZIP Downloads**: Streams selected or all gallery media directly into a `.zip` archive (`/api/download-zip`) using `archiver` with local cache reuse.
+*   **Permissions Mapping (PUID/PGID)**: Startup script (`entrypoint.sh`) dynamically adjusts volume directory ownership to your unRaid UID/GID (e.g. `99:100` / `nobody:users`).
+*   **RedGIFs Video & Image Support**: Supports both RedGIFs v3 HD/SD video streams (`media.redgifs.com` / `v3.redgifs.com`) and RedGIFs static image posts (`i.redgifs.com` / `redgifs.com/i/`) with automatic Reddit preview fallback.
+*   **Interactive Tag Error Warnings**: Feeds that fail (due to spelling typos or private/banned subreddits) are highlighted in the top bar with red warning chips (⚠️) and clear descriptions inside the tag manager.
+*   **Responsive Grid & Lightbox Modal**: Mobile, desktop, and tablet-friendly gallery interface with infinite scrolling, auto-play slideshow timer, looping video controls, and keyboard navigation (`Escape`, `ArrowLeft`, `ArrowRight`).
 
 ---
 
@@ -22,6 +22,7 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
+| `PORT` | Port the Express server listens on inside the container. | `3000` |
 | `PUID` | Host User ID to map container volumes for unRaid host file permission sync. | `99` (nobody) |
 | `PGID` | Host Group ID to map container volumes for unRaid host file permission sync. | `100` (users) |
 | `CACHE_LIMIT_GB` | The maximum storage size allocated for local media caching in Gigabytes. | `2` |
@@ -47,14 +48,37 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      - PORT=3000
       - PUID=99          # Set to your unRaid user UID (nobody is 99)
       - PGID=100         # Set to your unRaid group GID (users is 100)
-      - CACHE_LIMIT_GB=2  # Change this to set custom caching storage size in GB
+      - CACHE_LIMIT_GB=2 # Change this to set custom caching storage size in GB
+      - NODE_ENV=production
 ```
 
 Run command:
 ```bash
 docker compose up -d
+```
+
+---
+
+## 🔄 Building & Publishing Docker Images
+
+### Automated GitHub Actions Workflow (`.github/workflows/docker-publish.yml`)
+Every push to the `main` branch (or manual trigger via **Actions -> Build and Push Docker Image -> Run workflow**) automatically builds the Docker image and tags it with both `:latest` and the version in `package.json`:
+
+1.  **GitHub Container Registry (GHCR)**: Pushes automatically to `ghcr.io/dhovin/reddit-gallery:latest` and `ghcr.io/dhovin/reddit-gallery:<version>` using the built-in `GITHUB_TOKEN` (no extra setup required).
+2.  **Docker Hub (`dhovin/reddit-gallery`)**: To enable automatic pushes to Docker Hub from GitHub Actions, add the following secret in your GitHub repository under **Settings -> Secrets and variables -> Actions**:
+    *   `DOCKERHUB_TOKEN`: A Docker Hub Personal Access Token (PAT) with Read/Write permissions.
+    *   `DOCKERHUB_USERNAME` *(optional)*: Defaults to `dhovin` if omitted.
+
+### Manual Local Build & Push
+To build and push the image directly from your machine:
+
+```bash
+docker build -t dhovin/reddit-gallery:latest -t dhovin/reddit-gallery:1.2.3 .
+docker push dhovin/reddit-gallery:latest
+docker push dhovin/reddit-gallery:1.2.3
 ```
 
 ---
@@ -66,7 +90,7 @@ To run this container on unRaid:
 1.  Navigate to the **Docker** tab and click **Add Container**.
 2.  Fill in the configuration details:
     *   **Name**: `reddit-gallery`
-    *   **Repository**: `dhovin/reddit-gallery:latest` (or use versioned tag `dhovin/reddit-gallery:1.0.0`)
+    *   **Repository**: `dhovin/reddit-gallery:latest` (or `ghcr.io/dhovin/reddit-gallery:latest`)
     *   **Network Type**: `Bridge`
     *   **Port Connection**: Host `3000` -> Container `3000`
     *   **Volume Mount**:
@@ -98,9 +122,9 @@ To access your gallery securely from outside your home network, it is recommende
 
 ## 📂 File Layout
 
-*   `server.js`: Node.js Express backend serving APIs and validating CORS proxy requests.
-*   `nginx.conf`: Nginx web server configuration serving static React files and handling media file caching.
-*   `entrypoint.sh`: Privilege dropping startup wrapper for PUID/PGID filesystem sync.
-*   `src/`: Vite React frontend client files (components, styles, and logic).
+*   `server.js`: Node.js 22 Express backend serving static files, SQLite settings API, `/api/health`, `/api/proxy` media caching stream, and `/api/download-zip`.
+*   `public/index.html`: Single-page frontend gallery application.
+*   `entrypoint.sh`: Privilege-dropping startup wrapper for PUID/PGID filesystem sync.
+*   `.github/workflows/docker-publish.yml`: GitHub Actions CI/CD workflow for building and pushing Docker images.
 *   `data/settings.db`: Local SQLite database storing custom configurations.
-*   `data/cache/`: Folder containing cached binary media files.
+*   `data/cache/`: Folder containing cached binary media files and metadata.

@@ -1476,10 +1476,12 @@
         function isMediaVideo(src, meta) {
             if (!src) return false;
             if (meta && (meta.e === 'RedditVideo' || meta.e === 'Video' || meta.hlsUrl || meta.dashUrl)) return true;
-            if (src.includes('v.redd.it') || src.includes('redgifs.com')) return true;
             if (src.includes('format=mp4') || src.includes('format=webm')) return true;
             const pathname = src.split('?')[0].split('#')[0];
             if (pathname.match(/\.(mp4|webm|m3u8|mpd|gifv)$/i)) return true;
+            if (pathname.match(/\.(jpg|jpeg|png|gif|webp)$/i)) return false;
+            if (src.includes('i.redgifs.com') || src.includes('redgifs.com/i/')) return false;
+            if (src.includes('v.redd.it') || src.includes('redgifs.com')) return true;
             return false;
         }
 
@@ -1564,6 +1566,30 @@
             } 
 
             if (src.includes('redgifs.com')) {
+                const cleanRgSrc = src.replace(/&amp;/g, '&');
+                const rgPath = cleanRgSrc.split('?')[0].split('#')[0];
+                const isRgImage = cleanRgSrc.includes('i.redgifs.com') ||
+                    cleanRgSrc.includes('redgifs.com/i/') ||
+                    rgPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
+                    (data.post_hint === 'image' && !cleanRgSrc.includes('/watch/'));
+
+                if (isRgImage) {
+                    let imgSrc = cleanRgSrc;
+                    if (!rgPath.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+                        const iMatch = cleanRgSrc.match(/\/i\/([a-zA-Z0-9]+)/i);
+                        if (iMatch) {
+                            imgSrc = `https://i.redgifs.com/i/${iMatch[1]}.jpg`;
+                        }
+                    }
+                    mediaItems.push({
+                        type: 'image',
+                        src: imgSrc,
+                        fallbackSrc: thumb !== imgSrc ? thumb : null,
+                        thumb
+                    });
+                    return mediaItems;
+                }
+
                 let rgId = null;
                 if (data.secure_media && data.secure_media.oembed && data.secure_media.oembed.thumbnail_url) {
                     let tMatch = data.secure_media.oembed.thumbnail_url.match(/\/([a-zA-Z0-9]+)(?:-large|-mobile|-poster)?\.jpg/i);
@@ -1989,7 +2015,7 @@
                 </div>
             `;
             
-            const renderAsVideo = isMediaVideo(item.src, null) || item.type === 'video';
+            const renderAsVideo = item.type ? item.type === 'video' : isMediaVideo(item.src, null);
             
             if (renderAsVideo) {
                 modalImg.classList.add('hidden');
@@ -2080,7 +2106,11 @@
                 let currentImgIdx = 0;
                 const imgOptions = [
                     getProxiedImageUrl(item.src),
-                    item.src
+                    item.src,
+                    item.fallbackSrc ? getProxiedImageUrl(item.fallbackSrc) : null,
+                    item.fallbackSrc,
+                    item.thumb ? getProxiedImageUrl(item.thumb) : null,
+                    item.thumb
                 ].filter((v, i, a) => v && a.indexOf(v) === i);
 
                 modalImg.onload = () => {
