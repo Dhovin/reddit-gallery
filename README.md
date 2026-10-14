@@ -8,7 +8,13 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 *   **Zero-Build Single-Page Frontend**: Fast, self-contained HTML/JS interface (`public/index.html`) styled with Tailwind CSS, requiring no complex client build step.
 *   **Native SQLite Database**: Employs Node 22's built-in `node:sqlite` module for settings data (`settings.db`), eliminating file corruption and resolving unRaid root permission issues.
-*   **Automatic Anonymous Reddit OAuth**: Employs built-in installed-client OAuth authentication to query `oauth.reddit.com`, completely bypassing Reddit's aggressive 403 "Blocked by network security" WAF and 429 rate limit errors with zero user configuration required.
+*   **Automatic Anonymous Reddit OAuth**: Employs installed-client OAuth authentication via environment variables (`REDDIT_CLIENT_ID`) to query `oauth.reddit.com`, completely bypassing Reddit's aggressive 403 "Blocked by network security" WAF and 429 rate limit errors with zero credentials hardcoded in source code.
+*   **Security Hardening & Best Practices**:
+    *   **Zero-Credential Architecture**: Source code contains no embedded secrets, keys, or tokens. Configuration managed strictly via environment variables.
+    *   **SSRF Protection**: Media proxy strictly validates protocols (`http:`/`https:`) and host allowlists while blocking private IP ranges (`127.0.0.1`, `localhost`, RFC1918 subnets).
+    *   **HTTP Security Headers**: Enforces strict `Content-Security-Policy` (CSP), `X-Frame-Options`, `X-Content-Type-Options`, and disables server fingerprinting (`X-Powered-By`).
+    *   **Rate Limiting & DoS Protection**: Sliding-window rate limiters on `/api/proxy` and `/api/download-zip`, combined with a 500-item ZIP limit and path traversal sanitization.
+*   **Comprehensive Error Reporting & Logging**: Unified server logging, request/response latency tracking, stream error guards, and a `/api/client-log` endpoint that forwards browser-side errors directly into your Docker container logs.
 *   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the SQLite database (`settings.db`) on startup.
 *   **Streaming Media Proxy & Local LRU Cache**: Streams and caches media requests (`/api/proxy`) directly to disk (`/app/data/cache`) with automatic LRU cache pruning based on `CACHE_LIMIT_GB`.
 *   **Zero-RAM Streaming ZIP Downloads**: Streams selected or all gallery media directly into a `.zip` archive (`/api/download-zip`) using `archiver` with local cache reuse.
@@ -27,7 +33,7 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 | `PUID` | Host User ID to map container volumes for unRaid host file permission sync. | `99` (nobody) |
 | `PGID` | Host Group ID to map container volumes for unRaid host file permission sync. | `100` (users) |
 | `CACHE_LIMIT_GB` | The maximum storage size allocated for local media caching in Gigabytes. | `2` |
-| `REDDIT_CLIENT_ID` | *(Optional)* Custom Reddit API Client ID to override the built-in anonymous OAuth client. | `ohXpoqrZYub1kg` |
+| `REDDIT_CLIENT_ID` | Reddit API Client ID for installed-client or script OAuth access. | `ohXpoqrZYub1kg` (in docker-compose) |
 | `REDDIT_CLIENT_SECRET` | *(Optional)* Custom Reddit API Client Secret if using a registered script-type application. | `""` (empty) |
 
 ---
@@ -56,6 +62,8 @@ services:
       - PGID=100         # Set to your unRaid group GID (users is 100)
       - CACHE_LIMIT_GB=2 # Change this to set custom caching storage size in GB
       - NODE_ENV=production
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-ohXpoqrZYub1kg}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
 ```
 
 Run command:

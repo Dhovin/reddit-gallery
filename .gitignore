@@ -3,4 +3,10 @@ data/
 dist/
 scratch*
 *.bak
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
 

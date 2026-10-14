@@ -365,6 +365,44 @@
     </div>
 
     <script>
+        // Client-to-Server Error Reporting
+        const lastReportedErrors = new Map();
+        function reportErrorToServer(message, details = {}, level = 'error') {
+            try {
+                const now = Date.now();
+                const key = `${level}:${message}`;
+                if (lastReportedErrors.has(key) && (now - lastReportedErrors.get(key) < 10000)) {
+                    return; // Throttle duplicate errors to once every 10 seconds
+                }
+                lastReportedErrors.set(key, now);
+
+                fetch('/api/client-log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        level,
+                        message: String(message),
+                        details,
+                        url: window.location.pathname
+                    })
+                }).catch(() => {});
+            } catch (e) {}
+        }
+
+        window.addEventListener('error', (event) => {
+            reportErrorToServer(event.message, {
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno
+            });
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            reportErrorToServer('Unhandled Promise Rejection', {
+                reason: event.reason ? (event.reason.message || String(event.reason)) : 'unknown'
+            });
+        });
+
         // State Setup
         const DEFAULT_SUBS = [
             { name: 'earthporn', active: true },
@@ -755,6 +793,7 @@
                 }, 4000);
             } catch (err) {
                 console.error("[ERROR] Failed to start ZIP stream:", err);
+                reportErrorToServer("Failed to start ZIP stream", { error: err.message });
                 downloadStatus.textContent = `Error starting download: ${err.message}`;
                 setTimeout(() => {
                     progressContainer.classList.add('hidden');
@@ -1392,6 +1431,7 @@
                             return data.data.children;
                         } catch (e) {
                             console.error(`Error fetching ${item.name}`, e);
+                            reportErrorToServer(`Failed to fetch subreddit feed: r/${item.name}`, { error: e.message }, 'warn');
                             failedSubreddits.add(item.name);
                             renderChips();
                             if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {

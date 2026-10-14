@@ -16,5 +16,5 @@ services:
       - PGID=100         # Map host group GID (users)
       - CACHE_LIMIT_GB=2 # Max local media cache limit in Gigabytes
       - NODE_ENV=production
-      # - REDDIT_CLIENT_ID=     # Optional: override built-in anonymous OAuth client ID
-      # - REDDIT_CLIENT_SECRET= # Optional: override built-in OAuth secret if using script app
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-ohXpoqrZYub1kg} # Public installed-client ID (override via .env if desired)
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}       # Optional: Custom OAuth secret if using script app
