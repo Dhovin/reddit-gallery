@@ -197,6 +197,111 @@ function pruneCache() {
     }
 }
 
+// Allowed target hosts for proxying
+const ALLOWED_PROXY_HOSTS = [
+    'reddit.com', 'redditmedia.com', 'redd.it',
+    'oauth.reddit.com', 'i.redd.it', 'preview.redd.it', 'external-preview.redd.it', 'v.redd.it',
+    'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com', 'thumbs2.redgifs.com', 'i.redgifs.com',
+    'imgur.com', 'i.imgur.com'
+];
+
+function isHostAllowed(hostname) {
+    return ALLOWED_PROXY_HOSTS.some(host => hostname === host || hostname.endsWith('.' + host));
+}
+
+// --- Reddit OAuth & API Token Manager ---
+// Uses Reddit's official public installed_client authentication (same as Redlib / Reddit mobile app)
+// Can be optionally overridden via REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables.
+const REDDIT_DEFAULT_CLIENT_ID = 'ohXpoqrZYub1kg';
+const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID || REDDIT_DEFAULT_CLIENT_ID;
+const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET || '';
+const REDDIT_USER_AGENT = 'android:com.reddit.frontpage:v2024.12.0 (by /u/reddit)';
+
+let cachedRedditToken = null;
+let tokenExpiresAt = 0;
+let tokenFetchPromise = null;
+
+async function getRedditToken(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && cachedRedditToken && tokenExpiresAt > now + 60000) {
+        return cachedRedditToken;
+    }
+
+    if (tokenFetchPromise) {
+        return tokenFetchPromise;
+    }
+
+    tokenFetchPromise = (async () => {
+        try {
+            log.info('Acquiring Reddit OAuth access token...');
+            const isCustomAuth = Boolean(REDDIT_CLIENT_SECRET);
+            const authHeader = 'Basic ' + Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
+
+            const params = new URLSearchParams();
+            if (isCustomAuth) {
+                params.append('grant_type', 'client_credentials');
+            } else {
+                params.append('grant_type', 'https://oauth.reddit.com/grants/installed_client');
+                params.append('device_id', crypto.randomUUID());
+            }
+
+            const tokenRes = await fetch('https://www.reddit.com/api/v1/access_token', {
+                method: 'POST',
+                headers: {
+                    'Authorization': authHeader,
+                    'User-Agent': REDDIT_USER_AGENT,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString(),
+                signal: AbortSignal.timeout(10000)
+            });
+
+            if (!tokenRes.ok) {
+                const errText = await tokenRes.text().catch(() => '');
+                throw new Error(`Reddit token endpoint returned HTTP ${tokenRes.status}: ${errText.slice(0, 200)}`);
+            }
+
+            const tokenData = await tokenRes.json();
+            if (!tokenData.access_token) {
+                throw new Error(`Invalid token response: ${JSON.stringify(tokenData)}`);
+            }
+
+            cachedRedditToken = tokenData.access_token;
+            const expiresInSec = tokenData.expires_in || 3600;
+            tokenExpiresAt = Date.now() + (expiresInSec * 1000);
+            log.info(`Reddit OAuth token acquired successfully (expires in ${expiresInSec}s)`);
+            return cachedRedditToken;
+        } catch (err) {
+            log.error('Failed to obtain Reddit OAuth token:', err.message);
+            throw err;
+        } finally {
+            tokenFetchPromise = null;
+        }
+    })();
+
+    return tokenFetchPromise;
+}
+
+// Request pacer for Reddit API to avoid rapid bursts triggering 429 rate limits
+let lastRedditApiCallTime = 0;
+const REDDIT_MIN_REQUEST_INTERVAL_MS = 60;
+async function paceRedditRequest() {
+    const now = Date.now();
+    const timeSinceLast = now - lastRedditApiCallTime;
+    if (timeSinceLast < REDDIT_MIN_REQUEST_INTERVAL_MS) {
+        await new Promise(r => setTimeout(r, REDDIT_MIN_REQUEST_INTERVAL_MS - timeSinceLast));
+    }
+    lastRedditApiCallTime = Date.now();
+}
+
+function isRedditApiRequest(parsedUrl) {
+    const host = parsedUrl.hostname.toLowerCase();
+    const isReddit = host === 'reddit.com' || host.endsWith('.reddit.com');
+    if (!isReddit) return false;
+    const path = parsedUrl.pathname.toLowerCase();
+    return path.endsWith('.json') || path.includes('/r/') || path.includes('/user/') || path.includes('/api/');
+}
+
 // GET Proxy Endpoint (fetches and streams media streams, caches files locally)
 app.get('/api/proxy', async (req, res) => {
     const targetUrl = req.query.url;
@@ -206,15 +311,54 @@ app.get('/api/proxy', async (req, res) => {
 
     try {
         const parsedUrl = new URL(targetUrl);
-        const allowedHosts = [
-            'reddit.com', 'redditmedia.com', 'redd.it',
-            'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com', 'thumbs2.redgifs.com',
-            'imgur.com', 'i.imgur.com'
-        ];
-        const isAllowed = allowedHosts.some(host => parsedUrl.hostname === host || parsedUrl.hostname.endsWith('.' + host));
-        if (!isAllowed) {
+        if (!isHostAllowed(parsedUrl.hostname)) {
             log.warn(`GET /api/proxy: Forbidden target host requested: ${parsedUrl.hostname}`);
             return res.status(403).json({ error: 'Forbidden target host' });
+        }
+
+        // Intercept Reddit JSON API / Feed requests and route through oauth.reddit.com
+        if (isRedditApiRequest(parsedUrl)) {
+            await paceRedditRequest();
+
+            const apiUrl = new URL(targetUrl);
+            apiUrl.hostname = 'oauth.reddit.com';
+            apiUrl.protocol = 'https:';
+            if (!apiUrl.searchParams.has('raw_json')) apiUrl.searchParams.set('raw_json', '1');
+            if (!apiUrl.searchParams.has('include_over_18')) apiUrl.searchParams.set('include_over_18', '1');
+
+            let token = await getRedditToken();
+            let apiRes = await fetch(apiUrl.toString(), {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'User-Agent': REDDIT_USER_AGENT
+                },
+                signal: AbortSignal.timeout(15000)
+            });
+
+            // If token expired (401), force refresh and retry once
+            if (apiRes.status === 401) {
+                log.warn('Reddit API returned 401 Unauthorized. Refreshing OAuth token and retrying...');
+                token = await getRedditToken(true);
+                apiRes = await fetch(apiUrl.toString(), {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'User-Agent': REDDIT_USER_AGENT
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+            }
+
+            if (!apiRes.ok) {
+                const errText = await apiRes.text().catch(() => '');
+                log.warn(`GET /api/proxy (Reddit API): Remote returned HTTP ${apiRes.status} for ${apiUrl.pathname}: ${errText.slice(0, 150)}`);
+                return res.status(apiRes.status).json({ error: `Reddit API returned HTTP ${apiRes.status}` });
+            }
+
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache');
+            const nodeStream = Readable.fromWeb(apiRes.body);
+            nodeStream.pipe(res);
+            return;
         }
 
         const urlHash = crypto.createHash('md5').update(targetUrl).digest('hex');
@@ -383,12 +527,6 @@ app.post('/api/download-zip', async (req, res) => {
 
     archive.pipe(res);
 
-    const allowedHosts = [
-        'reddit.com', 'redditmedia.com', 'redd.it',
-        'redgifs.com', 'media.redgifs.com', 'v3.redgifs.com', 'thumbs2.redgifs.com',
-        'imgur.com', 'i.imgur.com'
-    ];
-
     const usedFilenames = new Set();
 
     for (const item of items) {
@@ -424,8 +562,7 @@ app.post('/api/download-zip', async (req, res) => {
 
             try {
                 const parsedUrl = new URL(targetUrl);
-                const isAllowed = allowedHosts.some(host => parsedUrl.hostname === host || parsedUrl.hostname.endsWith('.' + host));
-                if (!isAllowed) continue;
+                if (!isHostAllowed(parsedUrl.hostname)) continue;
 
                 const urlHash = crypto.createHash('md5').update(targetUrl).digest('hex');
                 const cacheFilePath = path.join(CACHE_DIR, urlHash);

@@ -8,6 +8,7 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 
 *   **Zero-Build Single-Page Frontend**: Fast, self-contained HTML/JS interface (`public/index.html`) styled with Tailwind CSS, requiring no complex client build step.
 *   **Native SQLite Database**: Employs Node 22's built-in `node:sqlite` module for settings data (`settings.db`), eliminating file corruption and resolving unRaid root permission issues.
+*   **Automatic Anonymous Reddit OAuth**: Employs built-in installed-client OAuth authentication to query `oauth.reddit.com`, completely bypassing Reddit's aggressive 403 "Blocked by network security" WAF and 429 rate limit errors with zero user configuration required.
 *   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the SQLite database (`settings.db`) on startup.
 *   **Streaming Media Proxy & Local LRU Cache**: Streams and caches media requests (`/api/proxy`) directly to disk (`/app/data/cache`) with automatic LRU cache pruning based on `CACHE_LIMIT_GB`.
 *   **Zero-RAM Streaming ZIP Downloads**: Streams selected or all gallery media directly into a `.zip` archive (`/api/download-zip`) using `archiver` with local cache reuse.
@@ -26,6 +27,8 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 | `PUID` | Host User ID to map container volumes for unRaid host file permission sync. | `99` (nobody) |
 | `PGID` | Host Group ID to map container volumes for unRaid host file permission sync. | `100` (users) |
 | `CACHE_LIMIT_GB` | The maximum storage size allocated for local media caching in Gigabytes. | `2` |
+| `REDDIT_CLIENT_ID` | *(Optional)* Custom Reddit API Client ID to override the built-in anonymous OAuth client. | `ohXpoqrZYub1kg` |
+| `REDDIT_CLIENT_SECRET` | *(Optional)* Custom Reddit API Client Secret if using a registered script-type application. | `""` (empty) |
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "reddit-gallery",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Dockerized Reddit Gallery Application",
   "main": "server.js",
   "scripts": {

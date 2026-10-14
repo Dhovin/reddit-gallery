@@ -9,6 +9,8 @@
     *   Ensures `isMediaVideo()` and `updateModalContent()` render RedGIFs static images in an `<img>` element inside the lightbox modal rather than a `<video>` element, with automatic fallback to Reddit's high-resolution preview image.
 
 ### 2. Backend Server & Database (`server.js`)
+*   **Automatic Anonymous Reddit OAuth**: Employs built-in installed-client OAuth authentication to query `oauth.reddit.com`, completely bypassing Reddit's aggressive 403 "Blocked by network security" WAF and 429 rate limit errors with zero user configuration required.
+*   **Request Pacing**: Staggers Reddit API calls to ensure multiple subreddits loading concurrently do not trip API rate limits.
 *   **Node 22 + SQLite (`node:sqlite`)**: Stores settings (`subreddits`, `blockedUsers`, `favorites`, `presets`) in `/app/data/settings.db` with automatic migration from legacy `settings.json`.
 *   **Streaming Proxy & LRU Disk Cache (`/api/proxy`)**: Validates allowed media hosts (`reddit.com`, `redd.it`, `redditmedia.com`, `redgifs.com`, `imgur.com`), streams responses directly to the client while caching to `/app/data/cache`, and prunes oldest files when total size exceeds `CACHE_LIMIT_GB`.
 *   **Zero-RAM Streaming ZIP Download (`/api/download-zip`)**: Uses `archiver` to stream media directly from local cache or remote hosts into a downloadable `.zip`.
@@ -23,7 +25,7 @@
     *   Pushes to **Docker Hub** (`dhovin/reddit-gallery`) whenever `DOCKERHUB_TOKEN` (and optional `DOCKERHUB_USERNAME`) are configured in GitHub repository secrets.
 *   **Manual Local Build & Push**:
     ```bash
-    docker build -t dhovin/reddit-gallery:latest -t dhovin/reddit-gallery:1.2.3 .
+    docker build -t dhovin/reddit-gallery:latest -t dhovin/reddit-gallery:1.2.4 .
     docker push dhovin/reddit-gallery:latest
-    docker push dhovin/reddit-gallery:1.2.3
+    docker push dhovin/reddit-gallery:1.2.4
     ```

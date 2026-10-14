@@ -586,7 +586,7 @@
                 console.log(`Trying proxy strategy: ${strategy.name} for ${url}`);
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const timeoutId = setTimeout(() => controller.abort(), 12000);
 
                 try {
                     const data = await strategy.fetch(url, controller.signal);
@@ -1369,35 +1369,39 @@
                     timeParam = `&t=${sortVal.split('-')[1]}`;
                 }
 
-                const promises = activeItems.map(async (item) => {
-                    if (cursors[item.name] === null) return [];
+                const batchSize = 4;
+                const results = [];
+                for (let i = 0; i < activeItems.length; i += batchSize) {
+                    const batch = activeItems.slice(i, i + batchSize);
+                    const batchResults = await Promise.all(batch.map(async (item) => {
+                        if (cursors[item.name] === null) return [];
 
-                    const after = cursors[item.name];
-                    let url;
-                    
-                    if (item.name.startsWith('u/')) {
-                        const username = item.name.substring(2);
-                        url = `https://www.reddit.com/user/${username}/submitted.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1&sort=${sortBase}${timeParam}`;
-                    } else {
-                        url = `https://www.reddit.com/r/${item.name}/${sortBase}.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1${timeParam}`;
-                    }
-
-                    try {
-                        const data = await fetchJsonWithFallback(url);
-                        cursors[item.name] = data.data.after; 
-                        return data.data.children;
-                    } catch (e) {
-                        console.error(`Error fetching ${item.name}`, e);
-                        failedSubreddits.add(item.name);
-                        renderChips();
-                        if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {
-                            renderTagsInManager();
+                        const after = cursors[item.name];
+                        let url;
+                        
+                        if (item.name.startsWith('u/')) {
+                            const username = item.name.substring(2);
+                            url = `https://www.reddit.com/user/${username}/submitted.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1&sort=${sortBase}${timeParam}`;
+                        } else {
+                            url = `https://www.reddit.com/r/${item.name}/${sortBase}.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1${timeParam}`;
                         }
-                        return [];
-                    }
-                });
 
-                const results = await Promise.all(promises);
+                        try {
+                            const data = await fetchJsonWithFallback(url);
+                            cursors[item.name] = data.data.after; 
+                            return data.data.children;
+                        } catch (e) {
+                            console.error(`Error fetching ${item.name}`, e);
+                            failedSubreddits.add(item.name);
+                            renderChips();
+                            if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {
+                                renderTagsInManager();
+                            }
+                            return [];
+                        }
+                    }));
+                    results.push(...batchResults);
+                }
                 
                 let mergedPosts = [];
                 let maxLength = Math.max(...results.map(arr => arr.length));
