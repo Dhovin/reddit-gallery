@@ -1,35 +1,30 @@
-# Walkthrough - Community Highlights Filtering, Scoped Manage Actions & Banned Account Tracking (v1.2.8)
+# Walkthrough - Auto-Drop on 404/Error & Non-Blocking API Dispatch Pacing (v1.2.10)
 
 ## 🛠️ Overview of Changes
 
-### 1. Community Highlights Hard-Ignore
-* **Root Issue**: Reddit places "Community Highlights" (stickied announcement threads, rules, and megathreads) at the very beginning of subreddit feeds regardless of sort order (`new`, `hot`, `top`). In a media gallery application, these posts typically produce empty cards or display moderator text announcements rather than user media.
-* **Solution**: In `fetchImages()`, added a hard filter skipping posts where `postData.stickied === true`. Profile-pinned posts (`pinned: true`) on user feeds are preserved.
+### 1. Auto-Drop & Deactivate on 404 / Permanent Feed Errors
+* **Root Problem**: When a subreddit or user feed returned an HTTP 404 (due to account suspension/ban, deletion, or typo), the item was flagged with an error badge but remained active in the user's `subreddits` array. Every time the feed refreshed, sorted, or hit infinite scroll, the gallery re-queried the dead feeds, causing unnecessary queue load and blocking healthy feeds from loading.
+* **Solution**: In `fetchImages()`, whenever a source returns a 404 or permanent error:
+  * Automatically sets `subObj.active = false`.
+  * Calls `saveSources()` to persist the deactivated state into SQLite `settings.db`.
+  * Marks `cursors[item.name] = null` and adds to `failedSubreddits`.
+  * The source is instantly dropped from the active feed and chip row, and appears in the **Inactive** tab in the Manage Sources drawer with the `⚠️ Error (Private/Banned/Typo)` badge and direct `🔗` Reddit link. Users can clean them up anytime using the protected **"Clear Inactive"** button.
 
-### 2. Differentiated Error States (Yellow 404 vs Red Banned)
-* **Yellow 404 / Temp Error**: When Reddit returns HTTP 404 or a network blip occurs during feed ingestion, the source is marked with a **yellow** warning badge (`⚠️ 404 (Not Found / Temp Error)`).
-* **Red Confirmed Banned**: When an account is confirmed as banned on Reddit, it is marked with a **red** badge (`🚫 Confirmed Banned`).
-* **Manage Sources Actions**: Each tag row in Manage Sources now includes:
-  * A direct verification link (`🔗`) pointing directly to Reddit (`reddit.com/user/...` or `reddit.com/r/...`).
-  * A one-click `Mark Banned` / `Unmark` action button that persists to SQLite `settings.db` under `confirmedBanned` and automatically deactivates the source.
+### 2. Non-Blocking Server Dispatch Pacer
+* **Root Problem**: Outbound requests to `oauth.reddit.com` in `server.js` were previously locked behind a synchronous sequential promise chain (`redditApiQueue`). If an invalid or dead endpoint hung or took several seconds, all subsequent requests in line were blocked. This caused valid subreddits behind it to exceed the browser's 12-second abort timer and falsely fail.
+* **Solution**: Replaced the sequential execution lock with an asynchronous **dispatch-time pacer** (`paceRedditApiRequest`). Requests are launched with guaranteed 250ms spacing between their *start times* to respect Reddit's rate limit, but run **concurrently**. A slow or dead endpoint no longer delays subsequent valid feeds.
+* Reduced the Reddit API request timeout from 15s to 8s (`AbortSignal.timeout(8000)`) so dead connections fail fast.
 
-### 3. Infinite Re-fetch Prevention & Fast 404
-* When a feed fetch fails (404), `cursors[item.name]` is now explicitly set to `null` so the Infinite Scroll sentinel observer does not endlessly retry failed feeds.
-* `PROXY_STRATEGIES` fast-fails immediately on 404 from the local backend proxy, skipping the 12-second JSONP fallback timeout.
+### 3. Immediate Fast-Fail on Local Backend Errors
+* In `fetchJsonWithFallback`, when the `local-backend` returns any HTTP error (400, 403, 404, 500, etc.), it immediately fast-fails and throws.
+* Completely eliminated the 12-second secondary fallback attempts to `jsonp` and `direct` (which are blocked by Reddit anyway and only caused up to 24 seconds of wasted browser hanging per dead feed).
 
-### 4. Full Reddit URL Parsing
-* `addSource()` now supports pasting full Reddit URLs:
-  * `https://www.reddit.com/user/MariaRose34/` cleanly resolves to `u/MariaRose34`.
-  * `https://www.reddit.com/r/art/` cleanly resolves to `art`.
+### 4. Comprehensive URL Extraction (`/u/`, `reddit.com/u/`, etc.)
+* Updated `extractCleanSourceName` to handle `https://www.reddit.com/u/...`, `reddit.com/user/...`, `/u/...`, and `/user/...` seamlessly, preventing malformed paths from producing false 404s.
 
-### 5. Scoped Bulk Actions & Protected "Clear Inactive"
-* In the Manage Sources drawer, **"Enable All"** and **"Disable All"** now exclusively apply to the currently active filter tab (`All`, `Active`, `Inactive`, `Subreddits`, `Users`, or search text).
-* **"Clear Inactive"** now prompts the user with an explicit confirmation dialog showing the exact count of inactive sources before deleting them.
-
-### 6. Version & Documentation
-* Version bumped to `v1.2.8` in `package.json`.
-* `Reddit_Gallery.html` and `public/index.html` synchronized with 0 byte differences.
-* `README.md` updated with new features and behaviors.
+### 5. Version & Verification
+* Bumped version to `1.2.10` in `package.json`.
+* Verified byte-for-byte synchronization between `Reddit_Gallery.html` and `public/index.html` via `fc.exe /b`.
 
 ---
 
@@ -37,10 +32,9 @@
 
 | Test Case | Method | Expected Result | Actual Result | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Community Highlights Filter** | Query `mockPosts` with stickied megathreads | Stickied posts skipped, non-stickied media kept | All stickied posts omitted | ✅ Pass |
-| **URL Extraction** | Parse `https://www.reddit.com/user/MariaRose34/` | Resolves to `u/MariaRose34` | `u/MariaRose34` | ✅ Pass |
-| **URL Extraction (Sub)** | Parse `https://www.reddit.com/r/cozyplaces/` | Resolves to `cozyplaces` | `cozyplaces` | ✅ Pass |
-| **Scoped Tag Filter** | Run `bulkTagAction('activate')` on `Users` filter | Only `u/...` enabled; subs untouched | Only users enabled | ✅ Pass |
-| **Settings API (Banned)** | `POST /api/settings` with `confirmedBanned` | Persisted in SQLite `settings.db` | Persisted and verified on `GET` | ✅ Pass |
-| **HTML Synchronization** | `fc.exe /b Reddit_Gallery.html public\index.html` | 0 byte differences | No differences encountered | ✅ Pass |
-| **Package Version** | Inspect `package.json` | Version `1.2.8` | `1.2.8` | ✅ Pass |
+| **Non-Blocking Dispatch Pacer** | Launch 3 requests with Req 1 delayed 800ms | Req 2 dispatches at ~250ms and finishes *before* Req 1 | Req 2 finished at 314ms, Req 1 at 811ms | ✅ Pass |
+| **Auto-Drop on 404** | Simulate 404 error on feed | Source deactivated (`active = false`), cursor `null` | Deactivated & recorded in `failedSubreddits` | ✅ Pass |
+| **429 Rate Limit Preservation** | Simulate 429 response | Source remains active, countdown banner triggered | Preserved active state, no deactivation | ✅ Pass |
+| **HTML Synchronization** | `fc.exe /b Reddit_Gallery.html public\index.html` | 0 byte differences | `FC: no differences encountered` | ✅ Pass |
+| **Server Syntax Check** | `node --check server.js` | 0 syntax errors | Clean execution | ✅ Pass |
+| **Package Version** | Inspect `package.json` | Version `1.2.10` | `1.2.10` | ✅ Pass |

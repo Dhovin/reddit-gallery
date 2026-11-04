@@ -81,7 +81,6 @@ if (checkStmt.get().count === 0) {
             if (oldSettings.blockedUsers) insertStmt.run('blockedUsers', JSON.stringify(oldSettings.blockedUsers));
             if (oldSettings.favorites) insertStmt.run('favorites', JSON.stringify(oldSettings.favorites));
             if (oldSettings.presets) insertStmt.run('presets', JSON.stringify(oldSettings.presets));
-            if (oldSettings.confirmedBanned) insertStmt.run('confirmedBanned', JSON.stringify(oldSettings.confirmedBanned));
             db.exec('COMMIT');
             
             log.info('Migration complete. Renaming settings.json to settings.json.bak');
@@ -152,8 +151,7 @@ app.get('/api/settings', (req, res) => {
             subreddits: settings.subreddits || [],
             blockedUsers: settings.blockedUsers || [],
             favorites: settings.favorites || [],
-            presets: settings.presets || {},
-            confirmedBanned: settings.confirmedBanned || []
+            presets: settings.presets || {}
         });
     } catch (err) {
         log.error('GET /api/settings failed:', err);
@@ -163,7 +161,7 @@ app.get('/api/settings', (req, res) => {
 
 // POST Settings
 app.post('/api/settings', (req, res) => {
-    const { subreddits, blockedUsers, favorites, presets, confirmedBanned } = req.body || {};
+    const { subreddits, blockedUsers, favorites, presets } = req.body || {};
 
     if (subreddits !== undefined && !Array.isArray(subreddits)) {
         log.warn('POST /api/settings: "subreddits" must be an array');
@@ -181,10 +179,6 @@ app.post('/api/settings', (req, res) => {
         log.warn('POST /api/settings: "presets" must be an object');
         return res.status(400).json({ error: '"presets" must be an object' });
     }
-    if (confirmedBanned !== undefined && !Array.isArray(confirmedBanned)) {
-        log.warn('POST /api/settings: "confirmedBanned" must be an array');
-        return res.status(400).json({ error: '"confirmedBanned" must be an array' });
-    }
 
     const insertStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 
@@ -194,7 +188,6 @@ app.post('/api/settings', (req, res) => {
         if (blockedUsers !== undefined) insertStmt.run('blockedUsers', JSON.stringify(blockedUsers));
         if (favorites !== undefined) insertStmt.run('favorites', JSON.stringify(favorites));
         if (presets !== undefined) insertStmt.run('presets', JSON.stringify(presets));
-        if (confirmedBanned !== undefined) insertStmt.run('confirmedBanned', JSON.stringify(confirmedBanned));
         
         db.exec('COMMIT');
         res.json({ success: true });
@@ -400,16 +393,23 @@ async function getRedditToken(forceRefresh = false) {
     return tokenFetchPromise;
 }
 
-// Request pacer for Reddit API to avoid rapid bursts triggering 429 rate limits
-let lastRedditApiCallTime = 0;
-const REDDIT_MIN_REQUEST_INTERVAL_MS = 60;
-async function paceRedditRequest() {
-    const now = Date.now();
-    const timeSinceLast = now - lastRedditApiCallTime;
-    if (timeSinceLast < REDDIT_MIN_REQUEST_INTERVAL_MS) {
-        await new Promise(r => setTimeout(r, REDDIT_MIN_REQUEST_INTERVAL_MS - timeSinceLast));
-    }
-    lastRedditApiCallTime = Date.now();
+// Non-Blocking Sequential Dispatch Pacer for Reddit API
+let lastRedditDispatchTime = 0;
+const REDDIT_MIN_DISPATCH_INTERVAL_MS = 250; // Guaranteed minimum 250ms spacing between outbound request starts
+let pacerQueue = Promise.resolve();
+
+function paceRedditApiRequest(requestFn) {
+    const ready = pacerQueue.then(async () => {
+        const now = Date.now();
+        const waitTime = Math.max(0, (lastRedditDispatchTime + REDDIT_MIN_DISPATCH_INTERVAL_MS) - now);
+        if (waitTime > 0) {
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+        lastRedditDispatchTime = Date.now();
+    });
+    // Keep pacer chain moving even if an individual task fails
+    pacerQueue = ready.catch(() => {});
+    return ready.then(() => requestFn());
 }
 
 function isRedditApiRequest(parsedUrl) {
@@ -447,8 +447,6 @@ app.get('/api/proxy', proxyRateLimiter, async (req, res) => {
 
         // Intercept Reddit JSON API / Feed requests and route through oauth.reddit.com
         if (isRedditApiRequest(parsedUrl)) {
-            await paceRedditRequest();
-
             const apiUrl = new URL(targetUrl);
             apiUrl.hostname = 'oauth.reddit.com';
             apiUrl.protocol = 'https:';
@@ -476,32 +474,41 @@ app.get('/api/proxy', proxyRateLimiter, async (req, res) => {
                 apiUrl.searchParams.delete('after');
             }
 
-            let token = await getRedditToken();
-            let apiRes = await fetch(apiUrl.toString(), {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'User-Agent': REDDIT_USER_AGENT,
-                    'Accept': 'application/json'
-                },
-                signal: AbortSignal.timeout(15000)
-            });
-
-            // If token expired (401), force refresh and retry once
-            if (apiRes.status === 401) {
-                log.warn('Reddit API returned 401 Unauthorized. Refreshing OAuth token and retrying...');
-                token = await getRedditToken(true);
-                apiRes = await fetch(apiUrl.toString(), {
+            const apiRes = await paceRedditApiRequest(async () => {
+                let token = await getRedditToken();
+                let res = await fetch(apiUrl.toString(), {
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'User-Agent': REDDIT_USER_AGENT,
                         'Accept': 'application/json'
                     },
-                    signal: AbortSignal.timeout(15000)
+                    signal: AbortSignal.timeout(8000)
                 });
-            }
+
+                // If token expired (401), force refresh and retry once
+                if (res.status === 401) {
+                    log.warn('Reddit API returned 401 Unauthorized. Refreshing OAuth token and retrying...');
+                    token = await getRedditToken(true);
+                    res = await fetch(apiUrl.toString(), {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'User-Agent': REDDIT_USER_AGENT,
+                            'Accept': 'application/json'
+                        },
+                        signal: AbortSignal.timeout(8000)
+                    });
+                }
+                return res;
+            });
 
             if (!apiRes.ok) {
                 const errText = await apiRes.text().catch(() => '');
+                if (apiRes.status === 429) {
+                    const retryAfter = apiRes.headers.get('retry-after') || apiRes.headers.get('x-ratelimit-reset') || '60';
+                    log.warn(`GET /api/proxy (Reddit API): Remote rate limit (429) for ${apiUrl.pathname}. Reset in ${retryAfter}s`);
+                    res.setHeader('Retry-After', retryAfter);
+                    return res.status(429).json({ error: 'Reddit API rate limit exceeded', retryAfter: parseInt(retryAfter, 10) || 60 });
+                }
                 log.warn(`GET /api/proxy (Reddit API): Remote returned HTTP ${apiRes.status} for ${apiUrl.pathname}: ${errText.slice(0, 150)}`);
                 return res.status(apiRes.status).json({ error: `Reddit API returned HTTP ${apiRes.status}` });
             }

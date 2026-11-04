@@ -19,11 +19,12 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 *   **Streaming Media Proxy & Local LRU Cache**: Streams and caches media requests (`/api/proxy`) directly to disk (`/app/data/cache`) with automatic LRU cache pruning based on `CACHE_LIMIT_GB`.
 *   **Zero-RAM Streaming ZIP Downloads**: Streams selected or all gallery media directly into a `.zip` archive (`/api/download-zip`) using `archiver` with local cache reuse.
 *   **Automatic Community Highlights & Sticky Filtering**: Hard-ignores stickied announcement threads, rules, and discussion megathreads (`postData.stickied === true`), ensuring the gallery only showcases genuine media submissions.
-*   **Differentiated Source Status & Error Indicators**:
-    *   **404 / Temporary Errors**: Displayed with yellow warning chips (⚠️) and stops infinite re-fetch loops.
-    *   **Confirmed Banned Accounts**: Flagged with red badges (🚫) and automatically deactivated from active feed queries.
-    *   **Verification & Banned Management**: Includes one-click Reddit profile links (`🔗`) and `Mark Banned` / `Unmark` actions in Manage Sources.
-*   **Flexible Source Input & Full Reddit URL Parsing**: Add sources either by name (`cozyplaces`, `u/username`) or by directly pasting full Reddit URLs (`https://www.reddit.com/r/...` or `https://www.reddit.com/user/...`).
+*   **Non-Blocking Reddit API Request Pacing & 429 Rate Limit Handling**:
+    *   **Server-Side Non-Blocking Dispatch Pacer**: Enforces a guaranteed 250ms minimum spacing between outbound Reddit API request dispatches while allowing concurrent execution, ensuring slow or dead endpoints cannot stall subsequent valid feeds or cause browser timeouts.
+    *   **Auto-Drop on 404 & Permanent Errors**: Automatically deactivates failing sources (`item.active = false`) upon receiving 404/permanent errors, persists the change in SQLite `settings.db`, and moves them to the Inactive manager tab to protect the active feed from being slowed down.
+    *   **Rate-Limit Protection & Auto-Resume**: Gracefully handles Reddit API HTTP 429 by extracting `Retry-After` / `x-ratelimit-reset`, notifying the client with an active countdown banner, and preserving feed cursors without falsely marking healthy subreddits as dead.
+    *   **Unified Error Indicators**: Dead or non-existent sources (banned, suspended, typo, or private) are clearly marked with red warning badges (⚠️) in chips and source manager alongside a direct Reddit verification link (`🔗`).
+*   **Flexible Source Input & Comprehensive Reddit URL Parsing**: Add sources either by name (`cozyplaces`, `u/username`) or by directly pasting full or short Reddit URLs (`https://www.reddit.com/r/...`, `https://www.reddit.com/user/...`, `reddit.com/u/...`, `/u/...`).
 *   **Scoped Bulk Source Controls**: "Enable All" and "Disable All" in the Manage Sources drawer strictly apply to the currently selected filter tab (`All`, `Active`, `Inactive`, `Subreddits`, `Users`, or text search).
 *   **Protected "Clear Inactive"**: Prompts with an explicit confirmation dialog displaying the exact number of inactive sources to be removed.
 *   **Permissions Mapping (PUID/PGID)**: Startup script (`entrypoint.sh`) dynamically adjusts volume directory ownership to your unRaid UID/GID (e.g. `99:100` / `nobody:users`).
@@ -94,9 +95,9 @@ Every push to the `main` branch (or manual trigger via **Actions -> Build and Pu
 To build and push the image directly from your machine:
 
 ```bash
-docker build -t dhovin/reddit-gallery:latest -t dhovin/reddit-gallery:1.2.3 .
+docker build -t dhovin/reddit-gallery:latest -t dhovin/reddit-gallery:1.2.10 .
 docker push dhovin/reddit-gallery:latest
-docker push dhovin/reddit-gallery:1.2.3
+docker push dhovin/reddit-gallery:1.2.10
 ```
 
 ---
