@@ -20,6 +20,11 @@ COPY public/ ./public/
 # Set execution permissions on entrypoint wrapper
 RUN chmod +x entrypoint.sh
 
+# Default environment configuration
+ENV PORT=3000 \
+    DATA_DIR=/app/data \
+    REDDIT_CLIENT_ID=ohXpoqrZYub1kg
+
 # Expose Node backend port
 EXPOSE 3000
 

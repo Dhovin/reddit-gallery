@@ -315,8 +315,10 @@ function isHostAllowed(hostname) {
 }
 
 // --- Reddit OAuth & API Token Manager ---
-// Credentials configured strictly via REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables.
-const REDDIT_CLIENT_ID = (process.env.REDDIT_CLIENT_ID || '').trim();
+// Uses Reddit's official public installed_client ID as fallback for zero-configuration deployments (e.g. unRaid)
+// Can be overridden via REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET environment variables.
+const REDDIT_DEFAULT_CLIENT_ID = 'ohXpoqrZYub1kg';
+const REDDIT_CLIENT_ID = (process.env.REDDIT_CLIENT_ID || REDDIT_DEFAULT_CLIENT_ID).trim();
 const REDDIT_CLIENT_SECRET = (process.env.REDDIT_CLIENT_SECRET || '').trim();
 const REDDIT_USER_AGENT = 'android:com.reddit.frontpage:v2024.12.0 (by /u/reddit)';
 
