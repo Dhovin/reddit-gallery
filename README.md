@@ -18,9 +18,16 @@ A self-hosted, lightweight, and sleek Reddit image & video gallery designed for 
 *   **Seamless Settings Migration**: Automatically migrates settings from any existing `settings.json` to the SQLite database (`settings.db`) on startup.
 *   **Streaming Media Proxy & Local LRU Cache**: Streams and caches media requests (`/api/proxy`) directly to disk (`/app/data/cache`) with automatic LRU cache pruning based on `CACHE_LIMIT_GB`.
 *   **Zero-RAM Streaming ZIP Downloads**: Streams selected or all gallery media directly into a `.zip` archive (`/api/download-zip`) using `archiver` with local cache reuse.
+*   **Automatic Community Highlights & Sticky Filtering**: Hard-ignores stickied announcement threads, rules, and discussion megathreads (`postData.stickied === true`), ensuring the gallery only showcases genuine media submissions.
+*   **Differentiated Source Status & Error Indicators**:
+    *   **404 / Temporary Errors**: Displayed with yellow warning chips (⚠️) and stops infinite re-fetch loops.
+    *   **Confirmed Banned Accounts**: Flagged with red badges (🚫) and automatically deactivated from active feed queries.
+    *   **Verification & Banned Management**: Includes one-click Reddit profile links (`🔗`) and `Mark Banned` / `Unmark` actions in Manage Sources.
+*   **Flexible Source Input & Full Reddit URL Parsing**: Add sources either by name (`cozyplaces`, `u/username`) or by directly pasting full Reddit URLs (`https://www.reddit.com/r/...` or `https://www.reddit.com/user/...`).
+*   **Scoped Bulk Source Controls**: "Enable All" and "Disable All" in the Manage Sources drawer strictly apply to the currently selected filter tab (`All`, `Active`, `Inactive`, `Subreddits`, `Users`, or text search).
+*   **Protected "Clear Inactive"**: Prompts with an explicit confirmation dialog displaying the exact number of inactive sources to be removed.
 *   **Permissions Mapping (PUID/PGID)**: Startup script (`entrypoint.sh`) dynamically adjusts volume directory ownership to your unRaid UID/GID (e.g. `99:100` / `nobody:users`).
 *   **RedGIFs Video & Image Support**: Supports both RedGIFs v3 HD/SD video streams (`media.redgifs.com` / `v3.redgifs.com`) and RedGIFs static image posts (`i.redgifs.com` / `redgifs.com/i/`) with automatic Reddit preview fallback.
-*   **Interactive Tag Error Warnings**: Feeds that fail (due to spelling typos or private/banned subreddits) are highlighted in the top bar with red warning chips (⚠️) and clear descriptions inside the tag manager.
 *   **Responsive Grid & Lightbox Modal**: Mobile, desktop, and tablet-friendly gallery interface with infinite scrolling, auto-play slideshow timer, looping video controls, and keyboard navigation (`Escape`, `ArrowLeft`, `ArrowRight`).
 
 ---

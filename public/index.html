@@ -413,6 +413,7 @@
         let subreddits = DEFAULT_SUBS;
         let blockedUsers = [];
         let favorites = [];
+        let confirmedBanned = [];
         let isSettingsLoaded = false;
         let failedSubreddits = new Set();
 
@@ -429,6 +430,7 @@
                     blockedUsers = data.blockedUsers || [];
                     favorites = data.favorites || [];
                     presets = data.presets || DEFAULT_PRESETS;
+                    confirmedBanned = data.confirmedBanned || [];
 
                     console.log(`[INFO] loadSettingsFromServer: Successfully loaded settings from server. Subreddits: ${subreddits.length}, Favorites: ${favorites.length}`);
 
@@ -437,6 +439,7 @@
                     localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
                     localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
                     localStorage.setItem('reddit_presets', JSON.stringify(presets));
+                    localStorage.setItem('reddit_confirmed_banned', JSON.stringify(confirmedBanned));
                 } else {
                     // First run / no server settings: try to migrate from browser localStorage
                     console.log("[INFO] loadSettingsFromServer: Server settings empty, checking browser localStorage for migration...");
@@ -447,6 +450,7 @@
                             blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
                             favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
                             presets = JSON.parse(localStorage.getItem('reddit_presets') || 'null') || DEFAULT_PRESETS;
+                            confirmedBanned = JSON.parse(localStorage.getItem('reddit_confirmed_banned') || '[]');
 
                             console.log(`[INFO] loadSettingsFromServer: Migrating settings from localStorage. Subreddits: ${subreddits.length}`);
                             // Save migrated settings to server immediately
@@ -470,6 +474,7 @@
                     blockedUsers = JSON.parse(localStorage.getItem('reddit_blocked_users') || '[]');
                     favorites = JSON.parse(localStorage.getItem('reddit_favorites') || '[]');
                     presets = JSON.parse(localStorage.getItem('reddit_presets')) || DEFAULT_PRESETS;
+                    confirmedBanned = JSON.parse(localStorage.getItem('reddit_confirmed_banned') || '[]');
                 } catch(err) {
                     console.error("[ERROR] loadSettingsFromServer: Fallback to localStorage failed. Using hardcoded defaults.", err);
                     subreddits = DEFAULT_SUBS;
@@ -488,11 +493,12 @@
                 localStorage.setItem('reddit_blocked_users', JSON.stringify(blockedUsers));
                 localStorage.setItem('reddit_favorites', JSON.stringify(favorites));
                 localStorage.setItem('reddit_presets', JSON.stringify(presets));
+                localStorage.setItem('reddit_confirmed_banned', JSON.stringify(confirmedBanned));
 
                 const response = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subreddits, blockedUsers, favorites, presets })
+                    body: JSON.stringify({ subreddits, blockedUsers, favorites, presets, confirmedBanned })
                 });
                 
                 if (response.ok) {
@@ -587,7 +593,11 @@
                 test: () => true,
                 fetch: async (url, signal) => {
                     const response = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`, { signal });
-                    if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+                    if (!response.ok) {
+                        const err = new Error(`HTTP status ${response.status}`);
+                        err.status = response.status;
+                        throw err;
+                    }
                     return await response.json();
                 }
             },
@@ -603,7 +613,11 @@
                 test: () => true,
                 fetch: async (url, signal) => {
                     const response = await fetch(url, { signal });
-                    if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+                    if (!response.ok) {
+                        const err = new Error(`HTTP status ${response.status}`);
+                        err.status = response.status;
+                        throw err;
+                    }
                     return await response.json();
                 }
             }
@@ -639,6 +653,10 @@
                     clearTimeout(timeoutId);
                     console.warn(`Proxy strategy ${strategy.name} failed for ${url}:`, e.message || e);
                     errors.push(`${strategy.name}: ${e.message || e}`);
+                    // Fast fail on definitive 404 from local backend (avoids 12s hanging timeout on jsonp)
+                    if (strategy.name === 'local-backend' && e.status === 404) {
+                        break;
+                    }
                 }
             }
 
@@ -976,21 +994,35 @@
             saveSettingsToServer();
         }
 
-        function addSource(rawName) {
-            // Input Sanitization: allow only alphanumeric, underscores, hyphens, and slashes
-            const sanitized = rawName.replace(/[^a-zA-Z0-9_\-\/]/g, '').trim();
-            if (!sanitized) return;
+        function extractCleanSourceName(raw) {
+            const trimmed = String(raw || '').trim();
+            if (!trimmed) return '';
 
-            let cleanName = sanitized;
-            const isUser = sanitized.toLowerCase().startsWith('u/');
-
-            if (!isUser) {
-                // Keep original casing but remove r/ prefix if present
-                cleanName = sanitized.replace(/^r\//i, '');
-            } else {
-                 // Keep original casing but format with standard u/ prefix
-                 cleanName = 'u/' + sanitized.substring(2);
+            // Check if full Reddit user URL (e.g. https://www.reddit.com/user/MariaRose34/)
+            const userUrlMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?reddit\.com\/user\/([a-zA-Z0-9_\-]+)/i);
+            if (userUrlMatch) {
+                return 'u/' + userUrlMatch[1];
             }
+
+            // Check if full Reddit subreddit URL (e.g. https://www.reddit.com/r/cozyplaces/)
+            const subUrlMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?reddit\.com\/r\/([a-zA-Z0-9_\-]+)/i);
+            if (subUrlMatch) {
+                return subUrlMatch[1];
+            }
+
+            // Input Sanitization: allow only alphanumeric, underscores, hyphens, and slashes
+            const sanitized = trimmed.replace(/[^a-zA-Z0-9_\-\/]/g, '').trim();
+            if (!sanitized) return '';
+
+            if (sanitized.toLowerCase().startsWith('u/')) {
+                return 'u/' + sanitized.substring(2);
+            }
+            return sanitized.replace(/^r\//i, '');
+        }
+
+        function addSource(rawName) {
+            const cleanName = extractCleanSourceName(rawName);
+            if (!cleanName) return;
 
             const existing = subreddits.find(s => s.name.toLowerCase() === cleanName.toLowerCase());
             if (!existing) {
@@ -1003,6 +1035,25 @@
                     toggleSubreddit(existing.name);
                 }
             }
+        }
+
+        function toggleConfirmedBanned(name) {
+            const lower = name.toLowerCase();
+            const idx = confirmedBanned.findIndex(n => n.toLowerCase() === lower);
+            if (idx >= 0) {
+                confirmedBanned.splice(idx, 1);
+            } else {
+                confirmedBanned.push(name);
+                // When marking as confirmed banned, automatically deactivate it
+                const sub = subreddits.find(s => s.name.toLowerCase() === lower);
+                if (sub) sub.active = false;
+            }
+            saveSources();
+            renderChips();
+            if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {
+                renderTagsInManager();
+            }
+            if (!isShowingFavorites) refreshFeed();
         }
 
         function removeSubreddit(name, event) {
@@ -1039,10 +1090,13 @@
             activeSubs.forEach(sub => {
                 const chip = document.createElement('div');
                 const isUser = sub.name.startsWith('u/');
+                const isBanned = confirmedBanned.some(n => n.toLowerCase() === sub.name.toLowerCase());
                 const isFailed = failedSubreddits.has(sub.name);
                 
-                if (isFailed) {
+                if (isBanned) {
                     chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-red-950/20 border-red-500/50 text-red-400 hover:bg-red-950/30 shrink-0`;
+                } else if (isFailed) {
+                    chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-yellow-950/20 border-yellow-500/50 text-yellow-400 hover:bg-yellow-950/30 shrink-0`;
                 } else {
                     chip.className = `chip-enter px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all border flex items-center gap-1.5 select-none bg-reddit/20 border-reddit text-reddit hover:bg-reddit/30 shrink-0`;
                 }
@@ -1056,13 +1110,23 @@
 
                 const span = document.createElement('span');
                 const prefix = isUser ? `<span class="opacity-75">u/</span>${sub.name.substring(2)}` : `r/${sub.name}`;
-                span.innerHTML = isFailed ? `⚠️ ${prefix}` : prefix;
+                if (isBanned) {
+                    span.innerHTML = `🚫 ${prefix}`;
+                } else if (isFailed) {
+                    span.innerHTML = `⚠️ ${prefix}`;
+                } else {
+                    span.innerHTML = prefix;
+                }
                 
                 const closeBtn = document.createElement('span');
                 closeBtn.innerHTML = '&times;';
-                closeBtn.className = isFailed 
-                    ? `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-red-400 font-bold text-sm`
-                    : `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-reddit font-bold text-sm`;
+                if (isBanned) {
+                    closeBtn.className = `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-red-400 font-bold text-sm`;
+                } else if (isFailed) {
+                    closeBtn.className = `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-yellow-400 font-bold text-sm`;
+                } else {
+                    closeBtn.className = `w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-white/20 leading-none pb-0.5 text-reddit font-bold text-sm`;
+                }
                 closeBtn.onclick = (e) => {
                     e.stopPropagation();
                     toggleSubreddit(sub.name);
@@ -1211,11 +1275,9 @@
             }, 300);
         }
 
-        function renderTagsInManager() {
-            const listContainer = document.getElementById('tag-manager-list');
-            listContainer.innerHTML = '';
-            
-            const searchVal = document.getElementById('tag-search').value.toLowerCase().trim();
+        function getFilteredTagsInManager() {
+            const searchInput = document.getElementById('tag-search');
+            const searchVal = searchInput ? searchInput.value.toLowerCase().trim() : '';
             
             let filtered = subreddits;
             
@@ -1234,6 +1296,14 @@
             } else if (currentTagFilter === 'users') {
                 filtered = filtered.filter(s => s.name.startsWith('u/'));
             }
+            return filtered;
+        }
+
+        function renderTagsInManager() {
+            const listContainer = document.getElementById('tag-manager-list');
+            listContainer.innerHTML = '';
+            
+            const filtered = getFilteredTagsInManager();
 
             if (filtered.length === 0) {
                 listContainer.innerHTML = `<p class="text-xs text-gray-500 italic text-center py-8">No matching tags found</p>`;
@@ -1242,16 +1312,23 @@
 
             filtered.forEach(sub => {
                 const isUser = sub.name.startsWith('u/');
+                const isBanned = confirmedBanned.some(n => n.toLowerCase() === sub.name.toLowerCase());
                 const isFailed = failedSubreddits.has(sub.name);
+                
                 const item = document.createElement('div');
-                item.className = `flex justify-between items-center p-2 rounded-lg border transition-colors cursor-pointer ${
-                    sub.active 
-                    ? (isFailed ? 'bg-red-950/10 border-red-500/30 hover:bg-red-950/20' : 'bg-reddit/5 border-reddit/40 hover:bg-reddit/10')
-                    : 'bg-transparent border-gray-700/50 hover:bg-white/5'
-                }`;
+                let rowBgClass = 'bg-transparent border-gray-700/50 hover:bg-white/5';
+                if (isBanned) {
+                    rowBgClass = 'bg-red-950/15 border-red-500/40 hover:bg-red-950/25';
+                } else if (isFailed) {
+                    rowBgClass = 'bg-yellow-950/15 border-yellow-500/40 hover:bg-yellow-950/25';
+                } else if (sub.active) {
+                    rowBgClass = 'bg-reddit/5 border-reddit/40 hover:bg-reddit/10';
+                }
+
+                item.className = `flex justify-between items-center p-2 rounded-lg border transition-colors cursor-pointer ${rowBgClass}`;
                 
                 item.onclick = (e) => {
-                    if (e.target.closest('.delete-btn') || e.target.type === 'checkbox') return;
+                    if (e.target.closest('.delete-btn') || e.target.closest('.banned-toggle-btn') || e.target.closest('a') || e.target.type === 'checkbox') return;
                     toggleSubreddit(sub.name);
                     renderTagsInManager();
                 };
@@ -1277,12 +1354,16 @@
                 nameSpan.textContent = isUser ? sub.name.substring(2) : sub.name;
                 
                 const typeSpan = document.createElement('span');
-                typeSpan.className = isFailed 
-                    ? 'text-[10px] text-red-400 uppercase tracking-wider font-bold' 
-                    : 'text-[10px] text-gray-500 uppercase tracking-wider font-bold';
-                typeSpan.textContent = isFailed 
-                    ? '⚠️ Error (Private/Banned/Typo)' 
-                    : (isUser ? 'User' : 'Subreddit');
+                if (isBanned) {
+                    typeSpan.className = 'text-[10px] text-red-400 uppercase tracking-wider font-bold';
+                    typeSpan.textContent = '🚫 Confirmed Banned';
+                } else if (isFailed) {
+                    typeSpan.className = 'text-[10px] text-yellow-400 uppercase tracking-wider font-bold';
+                    typeSpan.textContent = '⚠️ 404 (Not Found / Temp Error)';
+                } else {
+                    typeSpan.className = 'text-[10px] text-gray-500 uppercase tracking-wider font-bold';
+                    typeSpan.textContent = isUser ? 'User' : 'Subreddit';
+                }
                 
                 nameContainer.appendChild(nameSpan);
                 nameContainer.appendChild(typeSpan);
@@ -1290,21 +1371,54 @@
                 left.appendChild(checkbox);
                 left.appendChild(nameContainer);
 
+                // Right controls
+                const right = document.createElement('div');
+                right.className = 'flex items-center gap-2 shrink-0 ml-2';
+
+                // External Reddit link for easy verification
+                const redditUrl = isUser 
+                    ? `https://www.reddit.com/user/${encodeURIComponent(sub.name.substring(2))}/` 
+                    : `https://www.reddit.com/r/${encodeURIComponent(sub.name)}/`;
+                const link = document.createElement('a');
+                link.href = redditUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.className = 'text-gray-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors';
+                link.title = 'Open on Reddit to verify';
+                link.textContent = '🔗';
+                link.onclick = (e) => e.stopPropagation();
+                right.appendChild(link);
+
+                // Mark / Unmark Banned button
+                const banBtn = document.createElement('button');
+                banBtn.className = isBanned
+                    ? 'banned-toggle-btn text-[10px] font-bold text-red-400 hover:text-red-300 px-2 py-0.5 rounded border border-red-500/50 bg-red-950/30 hover:bg-red-900/40 transition-colors whitespace-nowrap'
+                    : 'banned-toggle-btn text-[10px] font-bold text-gray-400 hover:text-red-400 px-2 py-0.5 rounded border border-gray-700 hover:border-red-500/40 hover:bg-white/5 transition-colors whitespace-nowrap';
+                banBtn.textContent = isBanned ? 'Unmark' : 'Mark Banned';
+                banBtn.title = isBanned ? 'Remove confirmed banned status' : 'Mark as confirmed banned account';
+                banBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleConfirmedBanned(sub.name);
+                };
+                right.appendChild(banBtn);
+
                 const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'delete-btn text-gray-500 hover:text-red-500 px-2 py-1 transition-colors text-lg leading-none';
+                deleteBtn.className = 'delete-btn text-gray-500 hover:text-red-500 px-1.5 py-0.5 transition-colors text-lg leading-none';
                 deleteBtn.innerHTML = '&times;';
                 deleteBtn.title = 'Remove tag';
                 deleteBtn.onclick = (e) => {
                     e.stopPropagation();
                     subreddits = subreddits.filter(s => s.name !== sub.name);
+                    confirmedBanned = confirmedBanned.filter(n => n.toLowerCase() !== sub.name.toLowerCase());
                     saveSources();
                     renderChips();
                     renderTagsInManager();
                     if (!isShowingFavorites) refreshFeed();
                 };
+                right.appendChild(deleteBtn);
 
                 item.appendChild(left);
-                item.appendChild(deleteBtn);
+                item.appendChild(right);
                 listContainer.appendChild(item);
             });
         }
@@ -1341,12 +1455,29 @@
         }
 
         function bulkTagAction(action) {
+            const targets = getFilteredTagsInManager();
+
             if (action === 'activate') {
-                subreddits.forEach(s => s.active = true);
+                if (targets.length === 0) return;
+                targets.forEach(s => s.active = true);
             } else if (action === 'deactivate') {
-                subreddits.forEach(s => s.active = false);
+                if (targets.length === 0) return;
+                targets.forEach(s => s.active = false);
             } else if (action === 'delete-inactive') {
-                subreddits = subreddits.filter(s => s.active);
+                const inactiveTargets = targets.filter(s => !s.active);
+                if (inactiveTargets.length === 0) {
+                    alert('No inactive sources to remove in the current view.');
+                    return;
+                }
+                const count = inactiveTargets.length;
+                const confirmMsg = count === 1
+                    ? `Are you sure you want to remove 1 inactive source ("${inactiveTargets[0].name}")?`
+                    : `Are you sure you want to remove ${count} inactive sources?`;
+                if (!confirm(confirmMsg)) return;
+
+                const targetNames = new Set(inactiveTargets.map(t => t.name));
+                subreddits = subreddits.filter(s => !targetNames.has(s.name));
+                confirmedBanned = confirmedBanned.filter(n => !targetNames.has(n));
             } else if (action === 'sort') {
                 subreddits.sort((a, b) => a.name.localeCompare(b.name));
             }
@@ -1431,7 +1562,8 @@
                             return data.data.children;
                         } catch (e) {
                             console.error(`Error fetching ${item.name}`, e);
-                            reportErrorToServer(`Failed to fetch subreddit feed: r/${item.name}`, { error: e.message }, 'warn');
+                            reportErrorToServer(`Failed to fetch source feed: ${item.name}`, { error: e.message }, 'warn');
+                            cursors[item.name] = null;
                             failedSubreddits.add(item.name);
                             renderChips();
                             if (!document.getElementById('tag-manager-drawer').classList.contains('hidden')) {
@@ -1459,6 +1591,9 @@
                 mergedPosts.forEach(post => {
                     const postData = post.data;
                     
+                    // Hard ignore subreddit Community Highlights (stickied posts)
+                    if (postData.stickied) return;
+
                     if (blockedUsers.includes(postData.author)) return;
                     
                     // Route to the original post data if it's a crosspost (share)

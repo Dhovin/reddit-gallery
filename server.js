@@ -81,6 +81,7 @@ if (checkStmt.get().count === 0) {
             if (oldSettings.blockedUsers) insertStmt.run('blockedUsers', JSON.stringify(oldSettings.blockedUsers));
             if (oldSettings.favorites) insertStmt.run('favorites', JSON.stringify(oldSettings.favorites));
             if (oldSettings.presets) insertStmt.run('presets', JSON.stringify(oldSettings.presets));
+            if (oldSettings.confirmedBanned) insertStmt.run('confirmedBanned', JSON.stringify(oldSettings.confirmedBanned));
             db.exec('COMMIT');
             
             log.info('Migration complete. Renaming settings.json to settings.json.bak');
@@ -151,7 +152,8 @@ app.get('/api/settings', (req, res) => {
             subreddits: settings.subreddits || [],
             blockedUsers: settings.blockedUsers || [],
             favorites: settings.favorites || [],
-            presets: settings.presets || {}
+            presets: settings.presets || {},
+            confirmedBanned: settings.confirmedBanned || []
         });
     } catch (err) {
         log.error('GET /api/settings failed:', err);
@@ -161,7 +163,7 @@ app.get('/api/settings', (req, res) => {
 
 // POST Settings
 app.post('/api/settings', (req, res) => {
-    const { subreddits, blockedUsers, favorites, presets } = req.body || {};
+    const { subreddits, blockedUsers, favorites, presets, confirmedBanned } = req.body || {};
 
     if (subreddits !== undefined && !Array.isArray(subreddits)) {
         log.warn('POST /api/settings: "subreddits" must be an array');
@@ -179,6 +181,10 @@ app.post('/api/settings', (req, res) => {
         log.warn('POST /api/settings: "presets" must be an object');
         return res.status(400).json({ error: '"presets" must be an object' });
     }
+    if (confirmedBanned !== undefined && !Array.isArray(confirmedBanned)) {
+        log.warn('POST /api/settings: "confirmedBanned" must be an array');
+        return res.status(400).json({ error: '"confirmedBanned" must be an array' });
+    }
 
     const insertStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 
@@ -188,6 +194,7 @@ app.post('/api/settings', (req, res) => {
         if (blockedUsers !== undefined) insertStmt.run('blockedUsers', JSON.stringify(blockedUsers));
         if (favorites !== undefined) insertStmt.run('favorites', JSON.stringify(favorites));
         if (presets !== undefined) insertStmt.run('presets', JSON.stringify(presets));
+        if (confirmedBanned !== undefined) insertStmt.run('confirmedBanned', JSON.stringify(confirmedBanned));
         
         db.exec('COMMIT');
         res.json({ success: true });
