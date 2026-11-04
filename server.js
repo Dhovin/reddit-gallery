@@ -446,11 +446,33 @@ app.get('/api/proxy', proxyRateLimiter, async (req, res) => {
             if (!apiUrl.searchParams.has('raw_json')) apiUrl.searchParams.set('raw_json', '1');
             if (!apiUrl.searchParams.has('include_over_18')) apiUrl.searchParams.set('include_over_18', '1');
 
+            // Reddit WAF / edge security blocks /r/{sub}/new.json and /r/{sub}/rising.json with HTTP 403 network security blocks.
+            // Rewriting /r/{sub}/{sort}.json (or /r/{sub}/{sort}) to /r/{sub}.json?sort={sort} routes through the unblocked endpoint.
+            const subSortMatch = apiUrl.pathname.match(/^\/r\/([^/]+)\/(new|rising|hot|top|controversial)(?:\.json)?$/i);
+            if (subSortMatch) {
+                const sub = subSortMatch[1];
+                const sort = subSortMatch[2].toLowerCase();
+                apiUrl.pathname = `/r/${sub}.json`;
+                if (!apiUrl.searchParams.has('sort')) {
+                    apiUrl.searchParams.set('sort', sort);
+                }
+            } else {
+                const subOnlyMatch = apiUrl.pathname.match(/^\/r\/([^/]+)\/?$/i);
+                if (subOnlyMatch && !subOnlyMatch[1].endsWith('.json')) {
+                    apiUrl.pathname = `/r/${subOnlyMatch[1]}.json`;
+                }
+            }
+
+            if (apiUrl.searchParams.get('after') === '') {
+                apiUrl.searchParams.delete('after');
+            }
+
             let token = await getRedditToken();
             let apiRes = await fetch(apiUrl.toString(), {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'User-Agent': REDDIT_USER_AGENT
+                    'User-Agent': REDDIT_USER_AGENT,
+                    'Accept': 'application/json'
                 },
                 signal: AbortSignal.timeout(15000)
             });
@@ -462,7 +484,8 @@ app.get('/api/proxy', proxyRateLimiter, async (req, res) => {
                 apiRes = await fetch(apiUrl.toString(), {
                     headers: {
                         'Authorization': `Bearer ${token}`,
-                        'User-Agent': REDDIT_USER_AGENT
+                        'User-Agent': REDDIT_USER_AGENT,
+                        'Accept': 'application/json'
                     },
                     signal: AbortSignal.timeout(15000)
                 });

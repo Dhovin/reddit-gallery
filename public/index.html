@@ -1422,7 +1422,7 @@
                             const username = item.name.substring(2);
                             url = `https://www.reddit.com/user/${username}/submitted.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1&sort=${sortBase}${timeParam}`;
                         } else {
-                            url = `https://www.reddit.com/r/${item.name}/${sortBase}.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1${timeParam}`;
+                            url = `https://www.reddit.com/r/${item.name}.json?limit=${itemsPerSub}&after=${after}&raw_json=1&include_over_18=1&sort=${sortBase}${timeParam}`;
                         }
 
                         try {
